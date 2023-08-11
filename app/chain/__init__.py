@@ -250,8 +250,10 @@ class ChainBase(metaclass=ABCMeta):
         :param download_dir:  下载目录
         :return: None，该方法可被多个模块同时处理
         """
-        return self.run_module("download_added", context=context, torrent_path=torrent_path,
-                               download_dir=download_dir)
+        if settings.DOWNLOAD_SUBTITLE:
+            return self.run_module("download_added", context=context, torrent_path=torrent_path,
+                                   download_dir=download_dir)
+        return None
 
     def list_torrents(self, status: TorrentStatus = None,
                       hashs: Union[list, str] = None) -> Optional[List[Union[TransferTorrent, DownloadingTorrent]]]:
@@ -305,13 +307,13 @@ class ChainBase(metaclass=ABCMeta):
         """
         return self.run_module("stop_torrents", hashs=hashs)
 
-    def media_exists(self, mediainfo: MediaInfo) -> Optional[ExistMediaInfo]:
+    def media_exists(self, mediainfo: MediaInfo, itemid: Optional[str] = None) -> Optional[ExistMediaInfo]:
         """
         判断媒体文件是否存在
         :param mediainfo:  识别的媒体信息
         :return: 如不存在返回None，存在时返回信息，包括每季已存在所有集{type: movie/tv, seasons: {season: [episodes]}}
         """
-        return self.run_module("media_exists", mediainfo=mediainfo)
+        return self.run_module("media_exists", mediainfo=mediainfo, itemid=itemid)
 
     def refresh_mediaserver(self, mediainfo: MediaInfo, file_path: Path) -> Optional[bool]:
         """
