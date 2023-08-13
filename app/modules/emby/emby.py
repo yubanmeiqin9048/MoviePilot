@@ -294,14 +294,14 @@ class Emby(metaclass=Singleton):
         return []
 
     def get_tv_episodes(self,
-                        item_id: str = None,
+                        item_ids: List[str] = [],
                         title: str = None,
                         year: str = None,
                         tmdb_id: int = None,
                         season: int = None) -> Optional[Dict[int, list]]:
         """
         根据标题和年份和季，返回Emby中的剧集列表
-        :param item_id: Emby中的ID
+        :param item_ids: Emby中的ID列表
         :param title: 标题
         :param year: 年份
         :param tmdb_id: TMDBID
@@ -310,46 +310,49 @@ class Emby(metaclass=Singleton):
         """
         if not self._host or not self._apikey:
             return None
-        # 电视剧
-        if not item_id:
-            item_id = self.__get_emby_series_id_by_name(title, year)
-            if item_id is None:
-                return None
-            if not item_id:
-                return {}
-        # 验证tmdbid是否相同
-        item_tmdbid = self.get_iteminfo(item_id).get("ProviderIds", {}).get("Tmdb")
-        if tmdb_id and item_tmdbid:
-            if str(tmdb_id) != str(item_tmdbid):
-                return {}
-        # /Shows/Id/Episodes 查集的信息
+        item_id_by_name = ''
+        season_episodes = {}
         if not season:
             season = ""
-        try:
-            req_url = "%semby/Shows/%s/Episodes?Season=%s&IsMissing=false&api_key=%s" % (
-                self._host, item_id, season, self._apikey)
-            res_json = RequestUtils().get_res(req_url)
-            if res_json:
-                res_items = res_json.json().get("Items")
-                season_episodes = {}
-                for res_item in res_items:
-                    season_index = res_item.get("ParentIndexNumber")
-                    if not season_index:
-                        continue
-                    if season and season != season_index:
-                        continue
-                    episode_index = res_item.get("IndexNumber")
-                    if not episode_index:
-                        continue
-                    if season_index not in season_episodes:
-                        season_episodes[season_index] = []
-                    season_episodes[season_index].append(episode_index)
-                # 返回
-                return season_episodes
-        except Exception as e:
-            logger.error(f"连接Shows/Id/Episodes出错：" + str(e))
-            return None
-        return {}
+        # 电视剧
+        if not item_ids:
+            item_id_by_name = self.__get_emby_series_id_by_name(title, year)
+            if item_id_by_name is None:
+                return None
+            if not item_id_by_name:
+                return {}
+        if item_id_by_name:
+            item_ids.append(item_id_by_name)
+        for item_id in item_ids:
+            # 验证tmdbid是否相同
+            item_tmdbid = self.get_iteminfo(item_id).get("ProviderIds", {}).get("Tmdb")
+            if tmdb_id and item_tmdbid:
+                if str(tmdb_id) != str(item_tmdbid):
+                    continue
+            # /Shows/Id/Episodes 查集的信息
+            try:
+                req_url = "%semby/Shows/%s/Episodes?Season=%s&IsMissing=false&api_key=%s" % (
+                    self._host, item_id, season, self._apikey)
+                res_json = RequestUtils().get_res(req_url)
+                if res_json:
+                    res_items = res_json.json().get("Items")
+
+                    for res_item in res_items:
+                        season_index = res_item.get("ParentIndexNumber")
+                        if not season_index:
+                            continue
+                        if season and season != season_index:
+                            continue
+                        episode_index = res_item.get("IndexNumber")
+                        if not episode_index:
+                            continue
+                        if season_index not in season_episodes:
+                            season_episodes[season_index] = []
+                        season_episodes[season_index].append(episode_index)
+            except Exception as e:
+                logger.error(f"连接Shows/Id/Episodes出错：" + str(e))
+                return None
+        return season_episodes
 
     def get_remote_image_by_id(self, item_id: str, image_type: str) -> Optional[str]:
         """
@@ -591,6 +594,14 @@ class Emby(metaclass=Singleton):
             eventItem.client = message.get('Session').get('Client')
         if message.get("User"):
             eventItem.user_name = message.get("User").get('Name')
+        if message.get("item_isvirtual"):
+            eventItem.item_isvirtual = message.get("item_isvirtual")
+            eventItem.item_type = message.get("item_type")
+            eventItem.item_name = message.get("item_name")
+            eventItem.item_path = message.get("item_path")
+            eventItem.tmdb_id = message.get("tmdb_id")
+            eventItem.season_id = message.get("season_id")
+            eventItem.episode_id = message.get("episode_id")
 
         # 获取消息图片
         if eventItem.item_id:
@@ -605,6 +616,8 @@ class Emby(metaclass=Singleton):
         自定义URL从媒体服务器获取数据，其中{HOST}、{APIKEY}、{USER}会被替换成实际的值
         :param url: 请求地址
         """
+        if not self._host or not self._apikey:
+            return None
         url = url.replace("{HOST}", self._host)\
             .replace("{APIKEY}", self._apikey)\
             .replace("{USER}", self._user)

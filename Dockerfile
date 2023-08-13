@@ -1,4 +1,4 @@
-FROM python:3.10.11-slim
+FROM python:3.11.4-slim-bullseye
 ARG MOVIEPILOT_FRONTEND_VERSION
 ENV LANG="C.UTF-8" \
     HOME="/moviepilot" \
@@ -46,9 +46,16 @@ RUN apt-get update \
         wget \
         curl \
         busybox \
+        dumb-init \
+    && \
+    if [ "$(uname -m)" = "x86_64" ]; \
+        then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
+    elif [ "$(uname -m)" = "aarch64" ]; \
+        then ln -s /usr/lib/aarch64-linux-musl/libc.so /lib/libc.musl-aarch64.so.1; \
+    fi \
     && cp -f /app/nginx.conf /etc/nginx/nginx.template.conf \
     && cp /app/update /usr/local/bin/mp_update \
-    && chmod +x /app/start.sh /usr/local/bin/mp_update \
+    && chmod +x /app/start /usr/local/bin/mp_update \
     && mkdir -p ${HOME} \
     && groupadd -r moviepilot -g 911 \
     && useradd -r moviepilot -g moviepilot -d ${HOME} -s /bin/bash -u 911 \
@@ -73,4 +80,4 @@ RUN apt-get update \
         /var/tmp/*
 EXPOSE 3000
 VOLUME ["/config"]
-ENTRYPOINT [ "/app/start.sh" ]
+ENTRYPOINT [ "/app/start" ]

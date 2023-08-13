@@ -12,7 +12,14 @@ fi
 groupmod -o -g ${PGID} moviepilot
 usermod -o -u ${PUID} moviepilot
 # 更改文件权限
-chown -R moviepilot:moviepilot ${HOME} /app /config /etc/hosts
+chown -R moviepilot:moviepilot \
+    ${HOME} \
+    /app \
+    /public \
+    /config \
+    /var/lib/nginx \
+    /var/log/nginx
+chown moviepilot:moviepilot /etc/hosts /tmp
 # 下载浏览器内核
 gosu moviepilot:moviepilot playwright install chromium
 # 启动前端nginx服务
@@ -20,4 +27,4 @@ nginx
 # 设置后端服务权限掩码
 umask ${UMASK}
 # 启动后端服务
-exec gosu moviepilot:moviepilot python3 app/main.py
+exec dumb-init gosu moviepilot:moviepilot python3 app/main.py

@@ -95,15 +95,16 @@ class TorrentRemover(_PluginBase):
             self.tr = Transmission()
             if self._cron:
                 try:
-                    self._scheduler.add_job(self.delete_torrents,
-                                            CronTrigger.from_crontab(self._cron))
+                    self._scheduler.add_job(func=self.delete_torrents,
+                                            trigger=CronTrigger.from_crontab(self._cron),
+                                            name="自动删种服务")
                     logger.info(f"自动删种服务启动，周期：{self._cron}")
                 except Exception as err:
                     logger.error(f"自动删种服务启动失败：{str(err)}")
                     self.systemmessage.put(f"自动删种服务启动失败：{str(err)}")
             if self._onlyonce:
                 logger.info(f"自动删种服务启动，立即运行一次")
-                self._scheduler.add_job(self.delete_torrents, 'date',
+                self._scheduler.add_job(func=self.delete_torrents, trigger='date',
                                         run_date=datetime.now(
                                             tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3)
                                         )
@@ -111,7 +112,7 @@ class TorrentRemover(_PluginBase):
                 self._onlyonce = False
                 # 保存设置
                 self.update_config({
-                    "enable": self._enabled,
+                    "enabled": self._enabled,
                     "notify": self._notify,
                     "onlyonce": self._onlyonce,
                     "action": self._action,
@@ -130,9 +131,13 @@ class TorrentRemover(_PluginBase):
                     "torrentcategorys": self._torrentcategorys
 
                 })
+            if self._scheduler.get_jobs():
+                # 启动服务
+                self._scheduler.print_jobs()
+                self._scheduler.start()
 
     def get_state(self) -> bool:
-        return self._enabled and True if self._cron and self._downloaders else False
+        return True if self._enabled and self._cron and self._downloaders else False
 
     @staticmethod
     def get_command() -> List[Dict[str, Any]]:

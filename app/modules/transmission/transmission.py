@@ -11,7 +11,6 @@ from app.utils.string import StringUtils
 
 
 class Transmission(metaclass=Singleton):
-
     _host: str = None
     _port: int = None
     _username: str = None
@@ -26,7 +25,7 @@ class Transmission(metaclass=Singleton):
               "error", "errorString", "doneDate", "queuePosition", "activityDate", "trackers"]
 
     def __init__(self):
-        self._host, self._port = StringUtils.get_domain_address(settings.TR_HOST)
+        self._host, self._port = StringUtils.get_domain_address(address=settings.TR_HOST, prefix=False)
         self._username = settings.TR_USER
         self._password = settings.TR_PASSWORD
         if self._host and self._port and self._username and self._password:
@@ -73,7 +72,7 @@ class Transmission(metaclass=Singleton):
                 continue
             # 种子标签
             labels = [str(tag).strip()
-                      for tag in torrent.labels.split(',')] if hasattr(torrent, "labels") else []
+                      for tag in torrent.labels] if hasattr(torrent, "labels") else []
             if tags and not set(tags).issubset(set(labels)):
                 continue
             ret_torrents.append(torrent)
@@ -248,16 +247,9 @@ class Transmission(metaclass=Singleton):
             session = self.trc.get_session()
             download_limit_enabled = True if download_limit else False
             upload_limit_enabled = True if upload_limit else False
-            if download_limit_enabled == session.speed_limit_down_enabled and \
-                    upload_limit_enabled == session.speed_limit_up_enabled and \
-                    download_limit == session.speed_limit_down and \
-                    upload_limit == session.speed_limit_up:
-                return
             self.trc.set_session(
-                speed_limit_down=download_limit if download_limit != session.speed_limit_down
-                else session.speed_limit_down,
-                speed_limit_up=upload_limit if upload_limit != session.speed_limit_up
-                else session.speed_limit_up,
+                speed_limit_down=int(download_limit),
+                speed_limit_up=int(upload_limit),
                 speed_limit_down_enabled=download_limit_enabled,
                 speed_limit_up_enabled=upload_limit_enabled
             )

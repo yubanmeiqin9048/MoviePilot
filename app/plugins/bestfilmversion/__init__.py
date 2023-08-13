@@ -489,7 +489,7 @@ class BestFilmVersion(_PluginBase):
                         "poster": mediainfo.get_poster_image(),
                         "overview": mediainfo.overview,
                         "tmdbid": mediainfo.tmdb_id,
-                        "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
         # 保存历史记录
         self.save_data('history', history)
@@ -628,7 +628,11 @@ class BestFilmVersion(_PluginBase):
                     logger.warn(f'未识别到媒体信息，标题：{data.item_name}，tmdbID：{tmdb_id}')
                     return
         else:
-            if settings.MEDIASERVER == 'jellyfin' and (data.save_reason != 'UpdateUserRating' or not data.item_favorite):
+            if data.channel == 'jellyfin' and (data.save_reason != 'UpdateUserRating' or not data.item_favorite):
+                return
+            if data.channel == 'emby' and data.event != 'item.rate':
+                return
+            if data.channel == 'plex' and data.event != 'item.rate':
                 return
             if data.item_type not in ['Movie', 'MOV', 'movie']:
                 return
@@ -664,7 +668,7 @@ class BestFilmVersion(_PluginBase):
                 "poster": mediainfo.get_poster_image(),
                 "overview": mediainfo.overview,
                 "tmdbid": mediainfo.tmdb_id,
-                "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
         # 保存历史记录
         self.save_data('history', history)

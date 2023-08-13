@@ -3,13 +3,16 @@ from typing import List, Tuple, Dict, Any
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.core.config import settings
+from app.core.event import eventmanager, Event
 from app.log import logger
+from app.modules.emby import Emby
+from app.modules.jellyfin import Jellyfin
 from app.modules.plex import Plex
 from app.modules.qbittorrent import Qbittorrent
 from app.modules.transmission import Transmission
 from app.plugins import _PluginBase
-from app.schemas import NotificationType
-from app.utils.http import RequestUtils
+from app.schemas import NotificationType, WebhookEventInfo
+from app.schemas.types import EventType
 from app.utils.ip import IpUtils
 
 
@@ -47,6 +50,8 @@ class SpeedLimiter(_PluginBase):
     _play_down_speed: float = 0
     _noplay_up_speed: float = 0
     _noplay_down_speed: float = 0
+    # 当前限速状态
+    _current_state = ""
 
     def init_plugin(self, config: dict = None):
         # 读取配置
@@ -70,7 +75,7 @@ class SpeedLimiter(_PluginBase):
         # 启动限速任务
         if self._enabled:
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-            self._scheduler.add_job(func=self.__check_playing_sessions,
+            self._scheduler.add_job(func=self.check_playing_sessions,
                                     trigger='interval',
                                     seconds=self._interval,
                                     name="播放限速检查")
@@ -141,7 +146,7 @@ class SpeedLimiter(_PluginBase):
                                         'props': {
                                             'chips': True,
                                             'multiple': True,
-                                            'model': 'sign_sites',
+                                            'model': 'downloader',
                                             'label': '下载器',
                                             'items': [
                                                 {'title': 'Qbittorrent', 'value': 'qbittorrent'},
@@ -246,12 +251,17 @@ class SpeedLimiter(_PluginBase):
     def get_page(self) -> List[dict]:
         pass
 
-    def __check_playing_sessions(self):
+    @eventmanager.register(EventType.WebhookMessage)
+    def check_playing_sessions(self, event: Event = None):
         """
         检查播放会话
         """
         if not self._qb and not self._tr:
             return
+        if event:
+            event_data: WebhookEventInfo = event.event_data
+            if event_data.event not in ["playback.start", "PlaybackStart", "media.play"]:
+                return
         # 当前播放的总比特率
         total_bit_rate = 0
         # 查询播放中会话
@@ -259,7 +269,7 @@ class SpeedLimiter(_PluginBase):
         if settings.MEDIASERVER == "emby":
             req_url = "{HOST}emby/Sessions?api_key={APIKEY}"
             try:
-                res = RequestUtils().get_res(req_url)
+                res = Emby().get_data(req_url)
                 if res and res.status_code == 200:
                     sessions = res.json()
                     for session in sessions:
@@ -275,7 +285,7 @@ class SpeedLimiter(_PluginBase):
         elif settings.MEDIASERVER == "jellyfin":
             req_url = "{HOST}Sessions?api_key={APIKEY}"
             try:
-                res = RequestUtils().get_res(req_url)
+                res = Jellyfin().get_data(req_url)
                 if res and res.status_code == 200:
                     sessions = res.json()
                     for session in sessions:
@@ -322,6 +332,13 @@ class SpeedLimiter(_PluginBase):
         """
         if not self._qb and not self._tr:
             return
+        state = f"U:{upload_limit},D:{download_limit}"
+        if self._current_state == state:
+            # 限速状态没有改变
+            return
+        else:
+            self._current_state = state
+
         if upload_limit:
             text = f"上传：{upload_limit} KB/s"
         else:
@@ -335,22 +352,38 @@ class SpeedLimiter(_PluginBase):
                 self._qb.set_speed_limit(download_limit=download_limit, upload_limit=upload_limit)
                 # 发送通知
                 if self._notify:
-                    title = f"Qbittorrent 开始{limit_type}限速"
-                    self.post_message(
-                        mtype=NotificationType.MediaServer,
-                        title=title,
-                        text=text
-                    )
+                    title = "【播放限速】"
+                    if upload_limit or download_limit:
+                        subtitle = f"Qbittorrent 开始{limit_type}限速"
+                        self.post_message(
+                            mtype=NotificationType.MediaServer,
+                            title=title,
+                            text=f"{subtitle}\n{text}"
+                        )
+                    else:
+                        self.post_message(
+                            mtype=NotificationType.MediaServer,
+                            title=title,
+                            text=f"Qbittorrent 已取消限速"
+                        )
             if self._tr:
                 self._tr.set_speed_limit(download_limit=download_limit, upload_limit=upload_limit)
                 # 发送通知
                 if self._notify:
-                    title = f"Transmission 开始{limit_type}限速"
-                    self.post_message(
-                        mtype=NotificationType.MediaServer,
-                        title=title,
-                        text=text
-                    )
+                    title = "【播放限速】"
+                    if upload_limit or download_limit:
+                        subtitle = f"Transmission 开始{limit_type}限速"
+                        self.post_message(
+                            mtype=NotificationType.MediaServer,
+                            title=title,
+                            text=f"{subtitle}\n{text}"
+                        )
+                    else:
+                        self.post_message(
+                            mtype=NotificationType.MediaServer,
+                            title=title,
+                            text=f"Transmission 已取消限速"
+                        )
         except Exception as e:
             logger.error(f"设置限速失败：{str(e)}")
 
