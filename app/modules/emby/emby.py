@@ -261,7 +261,7 @@ class Emby(metaclass=Singleton):
                             item_ids.append(res_item.get('Id'))
         except Exception as e:
             logger.error(f"连接Items出错：" + str(e))
-            return None
+            return []
         return item_ids
 
     def get_movies(self, title: str, year: str = None) -> Optional[List[dict]]:

@@ -122,11 +122,11 @@ class FileTransferModule(_ModuleBase):
                        r"|chinese|(cn|ch[si]|sg|zho?|eng)[-_&](cn|ch[si]|sg|zho?|eng)" \
                        r"|简[体中]?)[.\])])" \
                        r"|([\u4e00-\u9fa5]{0,3}[中双][\u4e00-\u9fa5]{0,2}[字文语][\u4e00-\u9fa5]{0,3})" \
-                       r"|简体|简中|JPSC" \
+                       r"|简体|简中|JPSC|CHS" \
                        r"|(?<![a-z0-9])gb(?![a-z0-9])"
         _zhtw_sub_re = r"([.\[(](((zh[-_])?(hk|tw|cht|tc))" \
                        r"|繁[体中]?)[.\])])" \
-                       r"|繁体中[文字]|中[文字]繁体|繁体|JPTC" \
+                       r"|繁体中[文字]|中[文字]繁体|繁体|JPTC|CHT" \
                        r"|(?<![a-z0-9])big5(?![a-z0-9])"
         _eng_sub_re = r"[.\[(]eng[.\])]"
 
@@ -173,7 +173,7 @@ class FileTransferModule(_ModuleBase):
                     file_ext = file_item.suffix
                     new_sub_tag_dict = {
                         ".eng": ".英文",
-                        ".chi.zh-cn": ".简体中文",
+                        ".chi.zh-cn.default": ".简体中文",
                         ".zh-tw": ".繁体中文"
                     }
                     new_sub_tag_list = [

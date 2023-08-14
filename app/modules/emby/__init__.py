@@ -92,7 +92,8 @@ class EmbyModule(_ModuleBase):
                 year=mediainfo.year,
                 type=mediainfo.type,
                 category=mediainfo.category,
-                target_path=file_path
+                target_path=file_path,
+                tmdbid=mediainfo.tmdb_id
             )
         ]
         return self.emby.refresh_library_by_items(items)
