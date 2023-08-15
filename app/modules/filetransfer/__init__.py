@@ -339,7 +339,7 @@ class FileTransferModule(_ModuleBase):
                        mediainfo: MediaInfo,
                        transfer_type: str,
                        target_dir: Path = None
-                       ) -> Union[str, Tuple[bool, Path, list, int, List[Path], str]]:
+                       ) -> Union[str, Tuple[bool, Path, list, list, int, List[Path], str]]:
         """
         识别并转移一个文件、多个文件或者目录
         :param in_path: 转移的路径，可能是一个文件也可以是一个目录
@@ -410,7 +410,7 @@ class FileTransferModule(_ModuleBase):
                 # 计算大小
                 total_filesize += in_path.stat().st_size
                 # 返回转移后的路径
-                return bluray_flag, new_path, [], total_filesize, [], ""
+                return bluray_flag, new_path, [], [], total_filesize, [], ""
         else:
             # 获取文件清单
             transfer_files: List[Path] = SystemUtils.list_files_with_extensions(in_path, settings.RMT_MEDIAEXT)
@@ -588,10 +588,14 @@ class FileTransferModule(_ModuleBase):
         target_path = None
         if in_path:
             for path in dest_paths:
-                relative = Path(path).relative_to(in_path).as_posix()
-                if relative.startswith("..") or len(relative) > max_length:
-                    max_length = len(relative)
-                    target_path = path
+                try:
+                    relative = Path(path).relative_to(in_path).as_posix()
+                    if relative.startswith("..") or len(relative) > max_length:
+                        max_length = len(relative)
+                        target_path = path
+                except Exception as e:
+                    logger.debug(f"计算目标路径时出错：{e}")
+                    continue
             if target_path:
                 return Path(target_path)
         # 顺序匹配第1个满足空间存储要求的目录
