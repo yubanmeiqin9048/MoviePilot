@@ -239,13 +239,14 @@ class Emby(metaclass=Singleton):
             logger.error(f"连接Items/Counts出错：" + str(e))
             return {}
 
-    def __get_emby_series_id_by_name(self, name: str, year: str) -> Optional[str]:
+    def __get_emby_series_id_by_name(self, name: str) -> List[str]:
         """
         根据名称查询Emby中剧集的SeriesId
         :param name: 标题
         :param year: 年份
         :return: None 表示连不通，""表示未找到，找到返回ID
         """
+        item_ids = []
         if not self._host or not self._apikey:
             return None
         req_url = "%semby/Items?IncludeItemTypes=Series&Fields=ProductionYear&StartIndex=0&Recursive=true&SearchTerm=%s&Limit=10&IncludeSearchTypes=false&api_key=%s" % (
@@ -256,13 +257,12 @@ class Emby(metaclass=Singleton):
                 res_items = res.json().get("Items")
                 if res_items:
                     for res_item in res_items:
-                        if res_item.get('Name') == name and (
-                                not year or str(res_item.get('ProductionYear')) == str(year)):
-                            return res_item.get('Id')
+                        if res_item.get('Name') == name:
+                            item_ids.append(res_item.get('Id'))
         except Exception as e:
             logger.error(f"连接Items出错：" + str(e))
-            return None
-        return ""
+            return []
+        return item_ids
 
     def get_movies(self, title: str, year: str = None) -> Optional[List[dict]]:
         """
@@ -294,14 +294,14 @@ class Emby(metaclass=Singleton):
         return []
 
     def get_tv_episodes(self,
-                        item_id: str = None,
+                        item_ids: List[str] = [],
                         title: str = None,
                         year: str = None,
                         tmdb_id: int = None,
                         season: int = None) -> Optional[Dict[int, list]]:
         """
         根据标题和年份和季，返回Emby中的剧集列表
-        :param item_id: Emby中的ID
+        :param item_ids: Emby中的ID列表
         :param title: 标题
         :param year: 年份
         :param tmdb_id: TMDBID
@@ -310,46 +310,47 @@ class Emby(metaclass=Singleton):
         """
         if not self._host or not self._apikey:
             return None
-        # 电视剧
-        if not item_id:
-            item_id = self.__get_emby_series_id_by_name(title, year)
-            if item_id is None:
-                return None
-            if not item_id:
-                return {}
-        # 验证tmdbid是否相同
-        item_tmdbid = self.get_iteminfo(item_id).get("ProviderIds", {}).get("Tmdb")
-        if tmdb_id and item_tmdbid:
-            if str(tmdb_id) != str(item_tmdbid):
-                return {}
-        # /Shows/Id/Episodes 查集的信息
+        item_id_by_name = ''
+        season_episodes = {}
         if not season:
             season = ""
-        try:
-            req_url = "%semby/Shows/%s/Episodes?Season=%s&IsMissing=false&api_key=%s" % (
-                self._host, item_id, season, self._apikey)
-            res_json = RequestUtils().get_res(req_url)
-            if res_json:
-                res_items = res_json.json().get("Items")
-                season_episodes = {}
-                for res_item in res_items:
-                    season_index = res_item.get("ParentIndexNumber")
-                    if not season_index:
-                        continue
-                    if season and season != season_index:
-                        continue
-                    episode_index = res_item.get("IndexNumber")
-                    if not episode_index:
-                        continue
-                    if season_index not in season_episodes:
-                        season_episodes[season_index] = []
-                    season_episodes[season_index].append(episode_index)
-                # 返回
-                return season_episodes
-        except Exception as e:
-            logger.error(f"连接Shows/Id/Episodes出错：" + str(e))
-            return None
-        return {}
+        # 电视剧
+        if not item_ids:
+            item_id_by_name = self.__get_emby_series_id_by_name(title)
+            if not item_id_by_name:
+                return {}
+        if item_id_by_name:
+            item_ids=item_id_by_name
+        for item_id in item_ids:
+            # 验证tmdbid是否相同
+            item_tmdbid = self.get_iteminfo(item_id).get("ProviderIds", {}).get("Tmdb")
+            if tmdb_id and item_tmdbid:
+                if str(tmdb_id) != str(item_tmdbid):
+                    continue
+            # /Shows/Id/Episodes 查集的信息
+            try:
+                req_url = "%semby/Shows/%s/Episodes?Season=%s&IsMissing=false&api_key=%s" % (
+                    self._host, item_id, season, self._apikey)
+                res_json = RequestUtils().get_res(req_url)
+                if res_json:
+                    res_items = res_json.json().get("Items")
+
+                    for res_item in res_items:
+                        season_index = res_item.get("ParentIndexNumber")
+                        if not season_index:
+                            continue
+                        if season and season != season_index:
+                            continue
+                        episode_index = res_item.get("IndexNumber")
+                        if not episode_index:
+                            continue
+                        if season_index not in season_episodes:
+                            season_episodes[season_index] = []
+                        season_episodes[season_index].append(episode_index)
+            except Exception as e:
+                logger.error(f"连接Shows/Id/Episodes出错：" + str(e))
+                return None
+        return season_episodes
 
     def get_remote_image_by_id(self, item_id: str, image_type: str) -> Optional[str]:
         """
@@ -442,10 +443,18 @@ class Emby(metaclass=Singleton):
         if not item.title or not item.year or not item.type:
             return None
         if item.type != MediaType.MOVIE.value:
-            item_id = self.__get_emby_series_id_by_name(item.title, item.year)
-            if item_id:
-                # 存在电视剧，则直接刷新这个电视剧就行
-                return item_id
+            count = 0
+            item_ids = self.__get_emby_series_id_by_name(item.title)
+            if item_ids:
+                for itemid in item_ids:
+                    item_tmdbid = self.get_iteminfo(itemid).get("ProviderIds", {}).get("Tmdb")
+                    if str(item.tmdbid) == str(item_tmdbid):
+                        count = count + 1
+                # 总是刷新最新的媒体库
+                if count == 1:
+                    return item_ids[0]
+                else:
+                    return item_ids[-1]
         else:
             if self.get_movies(item.title, item.year):
                 # 已存在，不用刷新
