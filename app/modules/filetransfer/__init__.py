@@ -173,7 +173,7 @@ class FileTransferModule(_ModuleBase):
                     file_ext = file_item.suffix
                     new_sub_tag_dict = {
                         ".eng": ".英文",
-                        ".chi.zh-cn": ".简体中文",
+                        ".chi.zh-cn.default": ".简体中文",
                         ".zh-tw": ".繁体中文"
                     }
                     new_sub_tag_list = [
@@ -379,7 +379,7 @@ class FileTransferModule(_ModuleBase):
         # 处理文件清单
         file_list = []
 
-        # 目标文件清单
+        # 处理文件清单
         file_list_new = []
 
         # 失败文件清单
