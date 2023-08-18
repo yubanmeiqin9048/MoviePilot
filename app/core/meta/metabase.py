@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Self
 
 import cn2an
 import regex as re
@@ -30,7 +30,7 @@ class MetaBase(object):
     # 年份
     year: Optional[str] = None
     # 总季数
-    total_seasons: int = 0
+    total_season: int = 0
     # 识别的开始季 数字
     begin_season: Optional[int] = None
     # 识别的结束季 数字
@@ -115,13 +115,13 @@ class MetaBase(object):
                     return
                 if self.begin_season is None and isinstance(begin_season, int):
                     self.begin_season = begin_season
-                    self.total_seasons = 1
+                    self.total_season = 1
                 if self.begin_season is not None \
                         and self.end_season is None \
                         and isinstance(end_season, int) \
                         and end_season != self.begin_season:
                     self.end_season = end_season
-                    self.total_seasons = (self.end_season - self.begin_season) + 1
+                    self.total_season = (self.end_season - self.begin_season) + 1
                 self.type = MediaType.TV
                 self._subtitle_flag = True
             # 第x集
@@ -179,12 +179,12 @@ class MetaBase(object):
                     season_all = season_all_str.group(2)
                 if season_all and self.begin_season is None and self.begin_episode is None:
                     try:
-                        self.total_seasons = int(cn2an.cn2an(season_all.strip(), mode='smart'))
+                        self.total_season = int(cn2an.cn2an(season_all.strip(), mode='smart'))
                     except Exception as err:
                         print(str(err))
                         return
                     self.begin_season = 1
-                    self.end_season = self.total_seasons
+                    self.end_season = self.total_season
                     self.type = MediaType.TV
                     self._subtitle_flag = True
 
@@ -443,6 +443,65 @@ class MetaBase(object):
         elif str(ep).isdigit():
             self.begin_episode = int(ep)
             self.end_episode = None
+            
+    def merge(self, meta: Self):
+        """
+        全并Meta信息
+        """
+        # 类型
+        if self.type == MediaType.UNKNOWN \
+                and meta.type != MediaType.UNKNOWN:
+            self.type = meta.type
+        # 名称
+        if not self.name:
+            self.cn_name = meta.cn_name
+            self.en_name = meta.en_name
+        # 年份
+        if not self.year:
+            self.year = meta.year
+        # 开始季
+        if not self.begin_season:
+            self.begin_season = meta.begin_season
+        # 结束季
+        if not self.end_season:
+            self.end_season = meta.end_season
+        # 总季数
+        if self.begin_season and self.end_season:
+            self.total_season = (self.end_season - self.begin_season) + 1
+        elif self.begin_season:
+            self.total_season = 1
+        # 开始集
+        if not self.begin_episode:
+            self.begin_episode = meta.begin_episode
+        # 结束集
+        if not self.end_episode:
+            self.end_episode = meta.end_episode
+        # 总集数
+        if self.begin_episode and self.end_episode:
+            self.total_episode = (self.end_episode - self.begin_episode) + 1
+        elif self.begin_episode:
+            self.total_episode = 1
+        # 版本
+        if not self.resource_type:
+            self.resource_type = meta.resource_type
+        # 分辨率
+        if not self.resource_pix:
+            self.resource_pix = meta.resource_pix
+        # 制作组/字幕组
+        if not self.resource_team:
+            self.resource_team = meta.resource_team
+        # 特效
+        if not self.resource_effect:
+            self.resource_effect = meta.resource_effect
+        # 视频编码
+        if not self.video_encode:
+            self.video_encode = meta.video_encode
+        # 音频编码
+        if not self.audio_encode:
+            self.audio_encode = meta.audio_encode
+        # Part
+        if not self.part:
+            self.part = meta.part
 
     def to_dict(self):
         """

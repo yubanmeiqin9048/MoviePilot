@@ -36,7 +36,8 @@ class TransferChain(ChainBase):
         self.transferhis = TransferHistoryOper(self._db)
         self.progress = ProgressHelper()
 
-    def process(self, arg_str: str = None, channel: MessageChannel = None, userid: Union[str, int] = None) -> bool:
+    def process(self, arg_str: str = None,
+                channel: MessageChannel = None, userid: Union[str, int] = None) -> bool:
         """
         获取下载器中的种子列表，并执行转移
         :param arg_str: 传入的参数 (种子hash和TMDBID|类型)
@@ -144,6 +145,8 @@ class TransferChain(ChainBase):
                             status=0,
                             errmsg="未识别到媒体信息"
                         )
+                        # 设置种子状态，避免一直报错
+                        self.transfer_completed(hashs=torrent.hash, transinfo=transferinfo)
                         continue
                 else:
                     mediainfo = arg_mediainfo
@@ -154,13 +157,16 @@ class TransferChain(ChainBase):
                 transferinfo: TransferInfo = self.transfer(mediainfo=mediainfo,
                                                            path=torrent.path,
                                                            transfer_type=settings.TRANSFER_TYPE)
-                if not transferinfo or not transferinfo.target_path:
+                if not transferinfo:
+                    logger.error("文件转移模块运行失败")
+                    continue
+                if not transferinfo.target_path:
                     # 转移失败
-                    logger.warn(f"{torrent.title} 入库失败")
+                    logger.warn(f"{torrent.title} 入库失败：{transferinfo.message}")
                     self.post_message(Notification(
                         channel=channel,
                         title=f"{mediainfo.title_year}{meta.season_episode} 入库失败！",
-                        text=f"原因：{transferinfo.message if transferinfo else '未知'}",
+                        text=f"原因：{transferinfo.message or '未知'}",
                         image=mediainfo.get_message_image(),
                         userid=userid
                     ))
@@ -185,11 +191,13 @@ class TransferChain(ChainBase):
                         errmsg=transferinfo.message if transferinfo else '未知错误',
                         files=json.dumps(transferinfo.file_list) if transferinfo else None
                     )
+                    # 设置种子状态，避免一直报错
+                    self.transfer_completed(hashs=torrent.hash, transinfo=transferinfo)
                     continue
                 # 新增转移成功历史记录
                 self.transferhis.add(
                     src=str(torrent.path),
-                    dest=str(transferinfo.target_path) if transferinfo else None,
+                    dest=str(transferinfo.target_path),
                     mode=settings.TRANSFER_TYPE,
                     type=mediainfo.type.value,
                     category=mediainfo.category,
@@ -235,7 +243,7 @@ class TransferChain(ChainBase):
         """
         发送入库成功的消息
         """
-        msg_title = f"{mediainfo.title_year}{meta.season_episode} 已入库"
+        msg_title = f"{mediainfo.title_year} {meta.season_episode} 已入库"
         if mediainfo.vote_average:
             msg_str = f"评分：{mediainfo.vote_average}，类型：{mediainfo.type.value}"
         else:
