@@ -447,10 +447,11 @@ class Emby(metaclass=Singleton):
                     if str(item.tmdbid) == str(item_tmdbid):
                         count = count + 1
                 # 总是刷新最新的媒体库
-                if count == 1:
-                    return item_ids[0]
+                if count:
+                    return item_ids[count]
                 else:
-                    return item_ids[-1]
+                    return None
+                
         else:
             if self.get_movies(item.title, item.year):
                 # 已存在，不用刷新
