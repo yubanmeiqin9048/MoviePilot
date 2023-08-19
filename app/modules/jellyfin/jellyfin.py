@@ -218,12 +218,13 @@ class Jellyfin(metaclass=Singleton):
             logger.error(f"连接Items/Counts出错：" + str(e))
             return {}
 
-    def __get_jellyfin_series_id_by_name(self, name: str, year: str) -> Optional[str]:
+    def __get_jellyfin_series_id_by_name(self, name: str) -> List[str]:
         """
         根据名称查询Jellyfin中剧集的SeriesId
         """
         if not self._host or not self._apikey or not self._user:
             return None
+        item_ids = []
         req_url = "%sUsers/%s/Items?api_key=%s&searchTerm=%s&IncludeItemTypes=Series&Limit=10&Recursive=true" % (
             self._host, self._user, self._apikey, name)
         try:
@@ -232,13 +233,12 @@ class Jellyfin(metaclass=Singleton):
                 res_items = res.json().get("Items")
                 if res_items:
                     for res_item in res_items:
-                        if res_item.get('Name') == name and (
-                                not year or str(res_item.get('ProductionYear')) == str(year)):
-                            return res_item.get('Id')
+                        if res_item.get('Name') == name:
+                            item_ids.append(res_item.get('Id'))
         except Exception as e:
             logger.error(f"连接Items出错：" + str(e))
-            return None
-        return ""
+            return []
+        return item_ids
 
     def get_movies(self, title: str, year: str = None) -> Optional[List[dict]]:
         """
@@ -287,17 +287,12 @@ class Jellyfin(metaclass=Singleton):
             return None
         # 查TVID
         season_episodes = {}
-        item_id_by_name = ''
+        item_id_by_name = []
         if not season:
             season = ""
-        if not item_ids:
-            item_id_by_name = self.__get_jellyfin_series_id_by_name(title, year)
-            if item_id_by_name is None:
-                return None
-            if not item_id_by_name:
-                return {}
+        item_id_by_name = self.__get_jellyfin_series_id_by_name(title)
         if item_id_by_name:
-            item_ids.append(item_id_by_name)
+            item_ids=item_id_by_name
         for item_id in item_ids:
             # 验证tmdbid是否相同
             item_tmdbid = self.get_iteminfo(item_id).get("ProviderIds", {}).get("Tmdb")

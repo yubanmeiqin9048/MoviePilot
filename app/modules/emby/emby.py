@@ -246,9 +246,9 @@ class Emby(metaclass=Singleton):
         :param year: 年份
         :return: None 表示连不通，""表示未找到，找到返回ID
         """
-        item_ids = []
         if not self._host or not self._apikey:
             return None
+        item_ids = []
         req_url = "%semby/Items?IncludeItemTypes=Series&Fields=ProductionYear&StartIndex=0&Recursive=true&SearchTerm=%s&Limit=10&IncludeSearchTypes=false&api_key=%s" % (
             self._host, name, self._apikey)
         try:
@@ -310,15 +310,11 @@ class Emby(metaclass=Singleton):
         """
         if not self._host or not self._apikey:
             return None
-        item_id_by_name = ''
+        item_id_by_name = []
         season_episodes = {}
         if not season:
             season = ""
-        # 电视剧
-        if not item_ids:
-            item_id_by_name = self.__get_emby_series_id_by_name(title)
-            if not item_id_by_name:
-                return {}
+        item_id_by_name = self.__get_emby_series_id_by_name(title)
         if item_id_by_name:
             item_ids=item_id_by_name
         for item_id in item_ids:
