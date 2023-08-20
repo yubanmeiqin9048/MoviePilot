@@ -70,6 +70,6 @@ jobs:
         with:
           tag_name: v${{ env.app_version }}
           release_name: v${{ env.app_version }}
-          body: ${{ github.event.commits[0].message }}
+          body: v${{ env.app_version }}
           draft: false
           prerelease: false
