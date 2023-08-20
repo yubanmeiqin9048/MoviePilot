@@ -105,6 +105,10 @@ class TorrentSpider:
                 self.fields['download'] = {'selector': 'td:nth-child(5) > a', 'attribute': 'href'}
                 self.fields['date_added'] = {'selector': 'td:nth-child(1)'}
                 self.fields['size'] = {'selector': 'td:nth-child(4)'}
+        elif str(self.indexername) == '猫站':
+            self.fields['title'] = {'selector': 'td:nth-child(2) div div > a > b'}
+            self.fields['description'] = {'selector': 'td:nth-child(2) div div > span'}
+            self.fields['labels'] = {'selector': 'td:nth-child(2) div div > a.torrents-tag'} 
         self.render = indexer.get('render')
         self.domain = indexer.get('domain')
         self.page = page
