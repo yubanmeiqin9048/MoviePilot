@@ -226,11 +226,11 @@ class DirMonitor(_PluginBase):
                                                                tmdbid=mediainfo.tmdb_id)
                     if not mediainfo:
                         logger.warn(f'未识别到媒体信息，标题：{file_meta.name}')
-                        self.transferhis.add(
+                        self.transferhis.add_force(
                             src=event_path,
                             mode=settings.TRANSFER_TYPE,
-                            seasons=meta.season,
-                            episodes=meta.episode,
+                            seasons=file_meta.season,
+                            episodes=file_meta.episode,
                             download_hash=downloadHis.download_hash if downloadHis else None,
                             status=0,
                             errmsg="未识别到媒体信息",
@@ -263,7 +263,7 @@ class DirMonitor(_PluginBase):
                     if not transferinfo.target_path:
                         # 转移失败
                         logger.warn(f"{file_path.name} 入库失败：{transferinfo.message}")
-                        self.transferhis.add(
+                        self.transferhis.add_force(
                             src=event_path,
                             dest=str(transferinfo.target_path),
                             mode=settings.TRANSFER_TYPE,
@@ -275,8 +275,8 @@ class DirMonitor(_PluginBase):
                             imdbid=mediainfo.imdb_id,
                             tvdbid=mediainfo.tvdb_id,
                             doubanid=mediainfo.douban_id,
-                            seasons=meta.season,
-                            episodes=meta.episode,
+                            seasons=file_meta.season,
+                            episodes=file_meta.episode,
                             image=mediainfo.get_poster_image(),
                             download_hash=downloadHis.download_hash if downloadHis else None,
                             status=0,
