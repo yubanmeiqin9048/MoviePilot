@@ -225,8 +225,25 @@ class DirMonitor(_PluginBase):
 
                     # 识别媒体信息
                     mediainfo: MediaInfo = self.chain.recognize_media(meta=file_meta)
+                    # 获取downloadhash
+                    downloadHis = self.downloadhis.get_last_by(mtype=mediainfo.type.value,
+                                                               title=mediainfo.title,
+                                                               year=mediainfo.year,
+                                                               season=file_meta.season,
+                                                               episode=file_meta.episode,
+                                                               tmdbid=mediainfo.tmdb_id)
                     if not mediainfo:
                         logger.warn(f'未识别到媒体信息，标题：{file_meta.name}')
+                        self.transferhis.add_force(
+                            src=event_path,
+                            mode=settings.TRANSFER_TYPE,
+                            seasons=file_meta.season,
+                            episodes=file_meta.episode,
+                            download_hash=downloadHis.download_hash if downloadHis else None,
+                            status=0,
+                            errmsg="未识别到媒体信息",
+                            date=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                        )
                         if self._notify:
                             self.chain.post_message(Notification(
                                 mtype=NotificationType.Manual,
@@ -254,6 +271,27 @@ class DirMonitor(_PluginBase):
                     if not transferinfo.target_path:
                         # 转移失败
                         logger.warn(f"{file_path.name} 入库失败：{transferinfo.message}")
+                        self.transferhis.add_force(
+                            src=event_path,
+                            dest=str(transferinfo.target_path),
+                            mode=settings.TRANSFER_TYPE,
+                            type=mediainfo.type.value,
+                            category=mediainfo.category,
+                            title=mediainfo.title,
+                            year=mediainfo.year,
+                            tmdbid=mediainfo.tmdb_id,
+                            imdbid=mediainfo.imdb_id,
+                            tvdbid=mediainfo.tvdb_id,
+                            doubanid=mediainfo.douban_id,
+                            seasons=file_meta.season,
+                            episodes=file_meta.episode,
+                            image=mediainfo.get_poster_image(),
+                            download_hash=downloadHis.download_hash if downloadHis else None,
+                            status=0,
+                            errmsg=transferinfo.message or '未知错误',
+                            date=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                            # files=json.dumps(transferinfo.file_list)
+                        )
                         if self._notify:
                             self.chain.post_message(Notification(
                                 title=f"{mediainfo.title_year}{file_meta.season_episode} 入库失败！",

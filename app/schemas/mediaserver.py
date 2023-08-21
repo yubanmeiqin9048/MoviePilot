@@ -44,6 +44,8 @@ class RefreshMediaItem(BaseModel):
     category: Optional[str] = None
     # 目录
     target_path: Optional[Path] = None
+    # TMDBID
+    tmdbid: Optional[int] = None
 
 
 class MediaServerLibrary(BaseModel):
