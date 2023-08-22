@@ -1,7 +1,7 @@
 name: MoviePilot Docker
 on:
   workflow_dispatch:
-  
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -47,9 +47,11 @@ jobs:
           file: Dockerfile
           platforms: |
             linux/amd64
+            linux/arm64
           push: true
           build-args: |
-            MOVIEPILOT_VERSION=${{ env.app_version }}
+            MOVIEPILOT_FRONTEND_VERSION=${{ env.app_version }}
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/moviepilot:latest
             ${{ secrets.DOCKER_USERNAME }}/moviepilot:${{ env.app_version }}
+          labels: ${{ steps.meta.outputs.labels }}
