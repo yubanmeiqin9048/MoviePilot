@@ -100,8 +100,7 @@ class WechatModule(_ModuleBase):
                 if wechat_admins and not any(
                         user_id == admin_user for admin_user in wechat_admins):
                     self.wechat.send_msg(title="用户无权限执行菜单命令", userid=user_id)
-                    return CommingMessage(channel=MessageChannel.Wechat,
-                                          userid=user_id, username=user_id, text="")
+                    return None
             elif msg_type == "text":
                 # 文本消息
                 content = DomUtils.tag_value(root_node, "Content", default="")
@@ -115,14 +114,14 @@ class WechatModule(_ModuleBase):
         return None
 
     @checkMessage(MessageChannel.Wechat)
-    def post_message(self, message: Notification) -> Optional[bool]:
+    def post_message(self, message: Notification) -> None:
         """
         发送消息
         :param message: 消息内容
         :return: 成功或失败
         """
-        return self.wechat.send_msg(title=message.title, text=message.text,
-                                    image=message.image, userid=message.userid)
+        self.wechat.send_msg(title=message.title, text=message.text,
+                             image=message.image, userid=message.userid)
 
     @checkMessage(MessageChannel.Wechat)
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> Optional[bool]:
