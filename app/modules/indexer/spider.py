@@ -96,6 +96,8 @@ class TorrentSpider:
         self.fields = indexer.get('torrents').get('fields')
         if str(self.indexername).lower() == "mikan":
             if keyword:
+                self.fields['title'] = {'selector': 'td:nth-child(1)'}
+                self.fields['date_added'] = {'selector': 'td:nth-child(3)'}
                 self.fields['download'] = {'selector': 'td:nth-child(4) > a', 'attribute': 'href'}
             else:
                 self.list['selector'] = 'table.table.table-striped.tbl-border.fadeIn > tbody > tr'
