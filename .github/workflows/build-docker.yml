@@ -1,11 +1,6 @@
 name: MoviePilot Docker
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - version.py
 
 jobs:
   build:
@@ -55,7 +50,7 @@ jobs:
             linux/arm64
           push: true
           build-args: |
-            MOVIEPILOT_VERSION=${{ env.app_version }}
+            MOVIEPILOT_FRONTEND_VERSION=${{ env.app_version }}
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/moviepilot:latest
             ${{ secrets.DOCKER_USERNAME }}/moviepilot:${{ env.app_version }}

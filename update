@@ -13,14 +13,14 @@ if [[ "${old_version}" == *APP_VERSION* ]]; then
     current_version=v$(echo ${old_version} | sed -ne "s/APP_VERSION\s=\s'v\(.*\)'/\1/gp")
     echo "当前版本号：${current_version}"
     # 检查后端最新版本
-    new_version=$(curl ${CURL_OPTIONS} "https://api.github.com/repos/jxxghp/MoviePilot/releases/latest" | jq -r .tag_name)
+    new_version=$(curl ${CURL_OPTIONS} "https://api.github.com/repos/yubanmeiqin9048/MoviePilot/releases/latest" | jq -r .tag_name)
     if [[ "${new_version}" == *v* ]]; then
         release_version=${new_version}
         echo "最新版本号：${release_version}"
         if [ "${current_version}" != "${release_version}" ]; then
             echo "发现新版本，开始自动升级..."
             echo "正在下载后端程序 ${release_version}..."
-            curl ${CURL_OPTIONS} "https://github.com/jxxghp/MoviePilot/archive/refs/tags/${release_version}.zip" | busybox unzip -d /tmp -
+            curl ${CURL_OPTIONS} "https://github.com/yubanmeiqin9048/MoviePilot/archive/refs/tags/${release_version}.zip" | busybox unzip -d /tmp -
             if [ $? -eq 0 ]; then
                 echo "后端程序下载成功"
                 # 检查前端最新版本
