@@ -78,7 +78,7 @@ class TmdbHelper:
                 ret_infos.append(movie)
         return ret_infos
 
-    def search_tv_tmdbinfos(self, title: str, year: str) -> List[dict]:
+    def search_tvs(self, title: str, year: str) -> List[dict]:
         """
         查询模糊匹配的所有电视剧TMDB信息
         """
@@ -221,6 +221,12 @@ class TmdbHelper:
             logger.debug(f"{name} 未找到相关电影信息!")
             return {}
         else:
+            # 按年份降序排列
+            movies = sorted(
+                movies,
+                key=lambda x: x.get('release_date') or '0000-00-00',
+                reverse=True
+            )
             for movie in movies:
                 # 年份
                 movie_year = movie.get('release_date')[0:4] if movie.get('release_date') else None
@@ -263,6 +269,12 @@ class TmdbHelper:
             logger.debug(f"{name} 未找到相关剧集信息!")
             return {}
         else:
+            # 按年份降序排列
+            tvs = sorted(
+                tvs,
+                key=lambda x: x.get('first_air_date') or '0000-00-00',
+                reverse=True
+            )
             for tv in tvs:
                 tv_year = tv.get('first_air_date')[0:4] if tv.get('first_air_date') else None
                 if year and tv_year != year:
@@ -319,7 +331,12 @@ class TmdbHelper:
             logger.debug("%s 未找到季%s相关信息!" % (name, season_number))
             return {}
         else:
-            # 匹配标题、原标题
+            # 按年份降序排列
+            tvs = sorted(
+                tvs,
+                key=lambda x: x.get('first_air_date') or '0000-00-00',
+                reverse=True
+            )
             for tv in tvs:
                 # 年份
                 tv_year = tv.get('first_air_date')[0:4] if tv.get('first_air_date') else None
@@ -393,7 +410,12 @@ class TmdbHelper:
         if len(multis) == 0:
             logger.debug(f"{name} 未找到相关媒体息!")
         else:
-            # 匹配标题、原标题
+            # 按年份降序排列
+            multis = sorted(
+                multis,
+                key=lambda x: x.get('release_date') or x.get('first_air_date') or '0000-00-00',
+                reverse=True
+            )
             for multi in multis:
                 if multi.get("media_type") == "movie":
                     if self.__compare_names(name, multi.get('title')) \

@@ -163,10 +163,8 @@ class TheMovieDbModule(_ModuleBase):
             results = self.tmdb.search_multiis(meta.name)
         else:
             if meta.type == MediaType.UNKNOWN:
-                results = list(
-                    set(self.tmdb.search_movies(meta.name, meta.year))
-                    .union(set(self.tmdb.search_tv_tmdbinfos(meta.name, meta.year)))
-                )
+                results = self.tmdb.search_movies(meta.name, meta.year)
+                results.extend(self.tmdb.search_tvs(meta.name, meta.year))
                 # 组合结果的情况下要排序
                 results = sorted(
                     results,
@@ -176,7 +174,7 @@ class TheMovieDbModule(_ModuleBase):
             elif meta.type == MediaType.MOVIE:
                 results = self.tmdb.search_movies(meta.name, meta.year)
             else:
-                results = self.tmdb.search_tv_tmdbinfos(meta.name, meta.year)
+                results = self.tmdb.search_tvs(meta.name, meta.year)
 
         return [MediaInfo(tmdb_info=info) for info in results]
 
@@ -190,7 +188,7 @@ class TheMovieDbModule(_ModuleBase):
         if settings.SCRAP_SOURCE != "themoviedb":
             return None
         # 目录下的所有文件
-        for file in SystemUtils.list_files_with_extensions(path, settings.RMT_MEDIAEXT):
+        for file in SystemUtils.list_files(path, settings.RMT_MEDIAEXT):
             if not file:
                 continue
             logger.info(f"开始刮削媒体库文件：{file} ...")

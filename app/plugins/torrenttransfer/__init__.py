@@ -104,16 +104,16 @@ class TorrentTransfer(_PluginBase):
                 return
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
             if self._cron:
-                logger.info(f"移转做种服务启动，周期：{self._cron}")
+                logger.info(f"转移做种服务启动，周期：{self._cron}")
                 try:
                     self._scheduler.add_job(self.transfer,
                                             CronTrigger.from_crontab(self._cron))
                 except Exception as e:
-                    logger.error(f"移转做种服务启动失败：{e}")
-                    self.systemmessage(f"移转做种服务启动失败：{e}")
+                    logger.error(f"转移做种服务启动失败：{e}")
+                    self.systemmessage(f"转移做种服务启动失败：{e}")
                     return
             if self._onlyonce:
-                logger.info(f"移转做种服务启动，立即运行一次")
+                logger.info(f"转移做种服务启动，立即运行一次")
                 self._scheduler.add_job(self.transfer, 'date',
                                         run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(
                                             seconds=3))
@@ -481,9 +481,9 @@ class TorrentTransfer(_PluginBase):
 
     def transfer(self):
         """
-        开始移转做种
+        开始转移做种
         """
-        logger.info("开始移转做种任务 ...")
+        logger.info("开始转移做种任务 ...")
 
         # 源下载器
         downloader = self._fromdownloader
@@ -503,7 +503,7 @@ class TorrentTransfer(_PluginBase):
         trans_torrents = []
         for torrent in torrents:
             if self._event.is_set():
-                logger.info(f"移转服务停止")
+                logger.info(f"转移服务停止")
                 return
 
             # 获取种子hash
@@ -512,11 +512,11 @@ class TorrentTransfer(_PluginBase):
             save_path = self.__get_save_path(torrent, downloader)
 
             if self._nopaths and save_path:
-                # 过滤不需要移转的路径
+                # 过滤不需要转移的路径
                 nopath_skip = False
                 for nopath in self._nopaths.split('\n'):
                     if os.path.normpath(save_path).startswith(os.path.normpath(nopath)):
-                        logger.info(f"种子 {hash_str} 保存路径 {save_path} 不需要移转，跳过 ...")
+                        logger.info(f"种子 {hash_str} 保存路径 {save_path} 不需要转移，跳过 ...")
                         nopath_skip = True
                         break
                 if nopath_skip:
@@ -543,7 +543,7 @@ class TorrentTransfer(_PluginBase):
 
         # 开始转移任务
         if trans_torrents:
-            logger.info(f"需要移转的种子数：{len(trans_torrents)}")
+            logger.info(f"需要转移的种子数：{len(trans_torrents)}")
             # 记数
             total = len(trans_torrents)
             # 总成功数
@@ -652,12 +652,12 @@ class TorrentTransfer(_PluginBase):
             if self._notify:
                 self.post_message(
                     mtype=NotificationType.SiteMessage,
-                    title="【移转做种任务执行完成】",
+                    title="【转移做种任务执行完成】",
                     text=f"总数：{total}，成功：{success}，失败：{fail}"
                 )
         else:
-            logger.info(f"没有需要移转的种子")
-        logger.info("移转做种任务执行完成")
+            logger.info(f"没有需要转移的种子")
+        logger.info("转移做种任务执行完成")
 
     def check_recheck(self):
         """
@@ -697,17 +697,19 @@ class TorrentTransfer(_PluginBase):
                     can_seeding_torrents.append(hash_str)
 
             if can_seeding_torrents:
-                logger.info(f"共 {len(can_seeding_torrents)} 个任务校验完成，开始做种 ...")
+                logger.info(f"共 {len(can_seeding_torrents)} 个任务校验完成，开始做种")
                 # 开始做种
                 downloader_obj.start_torrents(ids=can_seeding_torrents)
                 # 去除已经处理过的种子
                 self._recheck_torrents[downloader] = list(
                     set(recheck_torrents).difference(set(can_seeding_torrents)))
+            else:
+                logger.info(f"没有新的任务校验完成，将在下次个周期继续检查 ...")
 
         elif torrents is None:
             logger.info(f"下载器 {downloader} 查询校验任务失败，将在下次继续查询 ...")
         else:
-            logger.info(f"下载器 {downloader} 中没有需要检查的校验任务，清空待处理列表 ...")
+            logger.info(f"下载器 {downloader} 中没有需要检查的校验任务，清空待处理列表")
             self._recheck_torrents[downloader] = []
 
         self._is_recheck_running = False
@@ -752,8 +754,8 @@ class TorrentTransfer(_PluginBase):
         判断种子是否可以做种并处于暂停状态
         """
         try:
-            return torrent.get("state") == "pausedUP" and torrent.get("tracker") if dl_type == "qbittorrent" \
-                else (torrent.status.stopped and torrent.percent_done == 1 and torrent.trackers)
+            return (torrent.get("state") == "pausedUP") if dl_type == "qbittorrent" \
+                else (torrent.status.stopped and torrent.percent_done == 1)
         except Exception as e:
             print(str(e))
             return False

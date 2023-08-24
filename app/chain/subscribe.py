@@ -424,7 +424,7 @@ class SubscribeChain(ChainBase):
                 # 回收资源
                 del torrents
             else:
-                logger.info(f'{indexer.get("name")} 获取到种子')
+                logger.info(f'{indexer.get("name")} 没有获取到种子')
         # 从缓存中匹配订阅
         self.match(torrents_cache)
         # 保存缓存到本地
@@ -650,16 +650,20 @@ class SubscribeChain(ChainBase):
             season = season_info.season
             if season == subscribe.season:
                 left_episodes = season_info.episodes
-                logger.info(f'{mediainfo.title_year} 季 {season} 更新缺失集数为{len(left_episodes)} ...')
+                if not left_episodes:
+                    lack_episode = season_info.total_episode
+                else:
+                    lack_episode = len(left_episodes)
+                logger.info(f'{mediainfo.title_year} 季 {season} 更新缺失集数为{lack_episode} ...')
                 if update_date:
                     # 同时更新最后时间
                     self.subscribeoper.update(subscribe.id, {
-                        "lack_episode": len(left_episodes),
+                        "lack_episode": lack_episode,
                         "last_update": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     })
                 else:
                     self.subscribeoper.update(subscribe.id, {
-                        "lack_episode": len(left_episodes)
+                        "lack_episode": lack_episode
                     })
 
     def remote_list(self, channel: MessageChannel, userid: Union[str, int] = None):
@@ -737,8 +741,8 @@ class SubscribeChain(ChainBase):
             if no_exist_season:
                 # 原季集列表
                 episode_list = no_exist_season.episodes
-                # 整季缺失的不处理
-                if not episode_list:
+                # 整季缺失且没有开始集数的的不处理
+                if not episode_list and not start_episode:
                     return no_exists
                 # 原总集数
                 total = no_exist_season.total_episode
