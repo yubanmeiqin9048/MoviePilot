@@ -138,13 +138,14 @@ class DirMonitor(_PluginBase):
                     target_path = Path(paths[1])
                     self._dirconf[mon_path] = target_path
 
-                # 检查目录是不是媒体库目录的子目录
+                # 检查媒体库目录是不是下载目录的子目录
                 try:
-                    if Path(mon_path).is_relative_to(target_path or settings.LIBRARY_PATH):
-                        logger.warn(f"{mon_path} 是媒体库目录/目的目录的子目录，无法监控")
-                        self.systemmessage.put(f"{mon_path} 是媒体库目录的子目录，无法监控")
+                    if target_path.is_relative_to(Path(mon_path)):
+                        logger.warn(f"{target_path} 是下载目录 {mon_path} 的子目录，无法监控")
+                        self.systemmessage.put(f"{target_path} 是下载目录 {mon_path} 的子目录，无法监控")
                         continue
                 except Exception as e:
+                    logger.debug(str(e))
                     pass
 
                 try:
@@ -237,8 +238,11 @@ class DirMonitor(_PluginBase):
                     file_meta.merge(meta)
 
                     if not file_meta.name:
-                        logger.warn(f"{file_path.name} 无法识别有效信息")
+                        logger.error(f"{file_path.name} 无法识别有效信息")
                         return
+
+                    # 查询转移目的目录
+                    target: Path = self._dirconf.get(mon_path)
 
                     # 识别媒体信息
                     mediainfo: MediaInfo = self.chain.recognize_media(meta=file_meta)
@@ -249,14 +253,24 @@ class DirMonitor(_PluginBase):
                                 mtype=NotificationType.Manual,
                                 title=f"{file_path.name} 未识别到媒体信息，无法入库！"
                             ))
+                        # 新增转移成功历史记录
+                        self.transferhis.add_force(
+                            src=event_path,
+                            dest=str(target),
+                            mode=self._transfer_type,
+                            title=meta.name,
+                            year=meta.year,
+                            seasons=file_meta.season,
+                            episodes=file_meta.episode,
+                            status=0,
+                            errmsg="未识别到媒体信息",
+                            date=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                        )
                         return
                     logger.info(f"{file_path.name} 识别为：{mediainfo.type.value} {mediainfo.title_year}")
 
                     # 更新媒体图片
                     self.chain.obtain_images(mediainfo=mediainfo)
-
-                    # 查询转移目的目录
-                    target = self._dirconf.get(mon_path)
 
                     # 转移
                     transferinfo: TransferInfo = self.chain.transfer(mediainfo=mediainfo,
@@ -285,11 +299,12 @@ class DirMonitor(_PluginBase):
 
                     target_path = str(transferinfo.file_list_new[0]) if transferinfo.file_list_new else str(
                         transferinfo.target_path)
+
                     # 新增转移成功历史记录
                     self.transferhis.add_force(
                         src=event_path,
                         dest=target_path,
-                        mode=settings.TRANSFER_TYPE,
+                        mode=self._transfer_type,
                         type=mediainfo.type.value,
                         category=mediainfo.category,
                         title=mediainfo.title,
@@ -423,22 +438,52 @@ class DirMonitor(_PluginBase):
                     # 汇总处理文件总大小
                     total_size = 0
                     file_count = 0
+
+                    # 剧集汇总
+                    episodes = []
                     for file in media_files:
                         transferinfo = file.get("transferinfo")
                         total_size += transferinfo.total_size
                         file_count += 1
+
+                        file_meta = file.get("file_meta")
+                        if file_meta and file_meta.begin_episode:
+                            episodes.append(file_meta.begin_episode)
+
                     transferinfo.total_size = total_size
                     # 汇总处理文件数量
                     transferinfo.file_count = file_count
 
+                    # 剧集季集信息 S01 E01-E04 || S01 E01、E02、E04
+                    season_episode = None
                     # 处理文件多，说明是剧集，显示季入库消息
-                    if mediainfo.type == MediaType.TV and file_count > 1:
-                        file_meta.begin_episode = file_meta.begin_episode
-                        file_meta.end_episode = media_files[-1].get("file_meta").begin_episode
+                    if mediainfo.type == MediaType.TV and len(episodes) > 1:
+                        # 剧集季
+                        season = "S%s" % str(file_meta.begin_season).rjust(2, "0")
+
+                        # 剧集按照升序排序
+                        episodes.sort()
+                        # 开始、结束index
+                        start = int(episodes[0])
+                        end = int(episodes[len(episodes) - 1])
+
+                        # 开始结束间所有的元素 1,2,3,4
+                        all_ele = [i for i in range(start, end + 1)]
+                        # 本次剧集组所有的元素 1,2,4
+                        episode_ele = [int(e) for e in episodes]
+
+                        # 如果本次剧集组所有元素=开始结束间所有元素，则表示区间内 S01 E01-E04
+                        if all_ele == episode_ele:
+                            season_episode = f"{season} E{str(episodes[start - 1]).rjust(2, '0')}-E{str(episodes[end - 1]).rjust(2, '0')}"
+                        else:
+                            # 否则所有剧集组逗号分隔显示 S01 E01、E02、E04
+                            episodes = ["E%s" % str(episode).rjust(2, "0") for episode in episodes]
+                            season_episode = f"{season} {'、'.join(episodes)}"
 
                     self.transferchian.send_transfer_message(meta=file_meta,
                                                              mediainfo=mediainfo,
-                                                             transferinfo=transferinfo)
+                                                             transferinfo=transferinfo,
+                                                             season_episode=season_episode)
                 # 发送完消息，移出key
                 del self._medias[medis_title_year_season]
                 continue
@@ -516,149 +561,149 @@ class DirMonitor(_PluginBase):
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
-            {
-                'component': 'VForm',
-                'content': [
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 6
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'enabled',
-                                            'label': '启用插件',
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 6
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'notify',
-                                            'label': '发送通知',
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 6
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSelect',
-                                        'props': {
-                                            'model': 'mode',
-                                            'label': '监控模式',
-                                            'items': [
-                                                {'title': '兼容模式', 'value': 'compatibility'},
-                                                {'title': '性能模式', 'value': 'fast'}
-                                            ]
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 6
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSelect',
-                                        'props': {
-                                            'model': 'transfer_type',
-                                            'label': '转移方式',
-                                            'items': [
-                                                {'title': '移动', 'value': 'move'},
-                                                {'title': '复制', 'value': 'copy'},
-                                                {'title': '硬链接', 'value': 'link'},
-                                                {'title': '软链接', 'value': 'softlink'}
-                                            ]
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextarea',
-                                        'props': {
-                                            'model': 'monitor_dirs',
-                                            'label': '监控目录',
-                                            'rows': 5,
-                                            'placeholder': '每一行一个目录，支持两种配置方式：\n'
-                                                           '监控目录\n'
-                                                           '监控目录:转移目的目录'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextarea',
-                                        'props': {
-                                            'model': 'exclude_keywords',
-                                            'label': '排除关键词',
-                                            'rows': 2,
-                                            'placeholder': '每一行一个关键词'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            }
-        ], {
-            "enabled": False,
-            "notify": False,
-            "mode": "fast",
-            "transfer_type": settings.TRANSFER_TYPE,
-            "monitor_dirs": "",
-            "exclude_keywords": ""
-        }
+                   {
+                       'component': 'VForm',
+                       'content': [
+                           {
+                               'component': 'VRow',
+                               'content': [
+                                   {
+                                       'component': 'VCol',
+                                       'props': {
+                                           'cols': 12,
+                                           'md': 6
+                                       },
+                                       'content': [
+                                           {
+                                               'component': 'VSwitch',
+                                               'props': {
+                                                   'model': 'enabled',
+                                                   'label': '启用插件',
+                                               }
+                                           }
+                                       ]
+                                   },
+                                   {
+                                       'component': 'VCol',
+                                       'props': {
+                                           'cols': 12,
+                                           'md': 6
+                                       },
+                                       'content': [
+                                           {
+                                               'component': 'VSwitch',
+                                               'props': {
+                                                   'model': 'notify',
+                                                   'label': '发送通知',
+                                               }
+                                           }
+                                       ]
+                                   }
+                               ]
+                           },
+                           {
+                               'component': 'VRow',
+                               'content': [
+                                   {
+                                       'component': 'VCol',
+                                       'props': {
+                                           'cols': 12,
+                                           'md': 6
+                                       },
+                                       'content': [
+                                           {
+                                               'component': 'VSelect',
+                                               'props': {
+                                                   'model': 'mode',
+                                                   'label': '监控模式',
+                                                   'items': [
+                                                       {'title': '兼容模式', 'value': 'compatibility'},
+                                                       {'title': '性能模式', 'value': 'fast'}
+                                                   ]
+                                               }
+                                           }
+                                       ]
+                                   },
+                                   {
+                                       'component': 'VCol',
+                                       'props': {
+                                           'cols': 12,
+                                           'md': 6
+                                       },
+                                       'content': [
+                                           {
+                                               'component': 'VSelect',
+                                               'props': {
+                                                   'model': 'transfer_type',
+                                                   'label': '转移方式',
+                                                   'items': [
+                                                       {'title': '移动', 'value': 'move'},
+                                                       {'title': '复制', 'value': 'copy'},
+                                                       {'title': '硬链接', 'value': 'link'},
+                                                       {'title': '软链接', 'value': 'softlink'}
+                                                   ]
+                                               }
+                                           }
+                                       ]
+                                   }
+                               ]
+                           },
+                           {
+                               'component': 'VRow',
+                               'content': [
+                                   {
+                                       'component': 'VCol',
+                                       'props': {
+                                           'cols': 12
+                                       },
+                                       'content': [
+                                           {
+                                               'component': 'VTextarea',
+                                               'props': {
+                                                   'model': 'monitor_dirs',
+                                                   'label': '监控目录',
+                                                   'rows': 5,
+                                                   'placeholder': '每一行一个目录，支持两种配置方式：\n'
+                                                                  '监控目录\n'
+                                                                  '监控目录:转移目的目录'
+                                               }
+                                           }
+                                       ]
+                                   }
+                               ]
+                           },
+                           {
+                               'component': 'VRow',
+                               'content': [
+                                   {
+                                       'component': 'VCol',
+                                       'props': {
+                                           'cols': 12
+                                       },
+                                       'content': [
+                                           {
+                                               'component': 'VTextarea',
+                                               'props': {
+                                                   'model': 'exclude_keywords',
+                                                   'label': '排除关键词',
+                                                   'rows': 2,
+                                                   'placeholder': '每一行一个关键词'
+                                               }
+                                           }
+                                       ]
+                                   }
+                               ]
+                           }
+                       ]
+                   }
+               ], {
+                   "enabled": False,
+                   "notify": False,
+                   "mode": "fast",
+                   "transfer_type": settings.TRANSFER_TYPE,
+                   "monitor_dirs": "",
+                   "exclude_keywords": ""
+               }
 
     def get_page(self) -> List[dict]:
         pass
