@@ -146,6 +146,8 @@ class MediaInfo(BaseModel):
     status: Optional[str] = None
     # 标签
     tagline: Optional[str] = None
+    # 风格ID
+    genre_ids: Optional[list] = []
     # 评价数量
     vote_count: Optional[int] = 0
     # 流行度

@@ -63,6 +63,7 @@ docker pull jxxghp/moviepilot:latest
 - **DOWNLOAD_PATH：** 下载保存目录，**注意：需要将`moviepilot`及`下载器`的映射路径保持一致**，否则会导致下载文件无法转移
 - **DOWNLOAD_MOVIE_PATH：** 电影下载保存目录，**必须是`DOWNLOAD_PATH`的下级路径**，不设置则下载到`DOWNLOAD_PATH`
 - **DOWNLOAD_TV_PATH：** 电视剧下载保存目录，**必须是`DOWNLOAD_PATH`的下级路径**，不设置则下载到`DOWNLOAD_PATH`
+- **DOWNLOAD_ANIME_PATH：** 动漫下载保存目录，**必须是`DOWNLOAD_PATH`的下级路径**，不设置则下载到`DOWNLOAD_PATH`
 - **DOWNLOAD_CATEGORY：** 下载二级分类开关，`true`/`false`，默认`false`，开启后会根据配置`category.yaml`自动在下载目录下建立二级目录分类
 - **DOWNLOAD_SUBTITLE：** 下载站点字幕，`true`/`false`，默认`true`
 - **REFRESH_MEDIASERVER：** 入库刷新媒体库，`true`/`false`，默认`true`
@@ -71,6 +72,7 @@ docker pull jxxghp/moviepilot:latest
 - **LIBRARY_PATH：** 媒体库目录，多个目录使用`,`分隔
 - **LIBRARY_MOVIE_NAME：** 电影媒体库目录名，默认`电影`
 - **LIBRARY_TV_NAME：** 电视剧媒体库目录名，默认`电视剧`
+- **LIBRARY_ANIME_NAME：** 动漫媒体库目录名，默认`电视剧/动漫`
 - **LIBRARY_CATEGORY：** 媒体库二级分类开关，`true`/`false`，默认`false`，开启后会根据配置`category.yaml`自动在媒体库目录下建立二级目录分类
 - **TRANSFER_TYPE：** 转移方式，支持`link`/`copy`/`move`/`softlink`  **注意：在`link`和`softlink`转移方式下，转移后的文件会继承源文件的权限掩码，不受`UMASK`影响**
 - **COOKIECLOUD_HOST：** CookieCloud服务器地址，格式：`http://ip:port`，必须配置，否则无法添加站点
@@ -79,6 +81,7 @@ docker pull jxxghp/moviepilot:latest
 - **COOKIECLOUD_INTERVAL：** CookieCloud同步间隔（分钟）
 - **USER_AGENT：** CookieCloud对应的浏览器UA，可选，设置后可增加连接站点的成功率，同步站点后可以在管理界面中修改
 - **AUTO_DOWNLOAD_USER：** 交互搜索自动下载用户ID，使用,分割
+- **SUBSCRIBE_SEARCH：** 订阅搜索，`true`/`false`，默认`false`，开启后会每隔24小时对所有订阅进行全量搜索，以补齐缺失剧集（一般情况下正常订阅即可，订阅搜索只做为兜底，会增加站点压力，不建议开启）。
 - **MESSAGER：** 消息通知渠道，支持 `telegram`/`wechat`/`slack`，开启多个渠道时使用`,`分隔。同时还需要配置对应渠道的环境变量，非对应渠道的变量可删除，推荐使用`telegram`
 
   - `wechat`设置项：
