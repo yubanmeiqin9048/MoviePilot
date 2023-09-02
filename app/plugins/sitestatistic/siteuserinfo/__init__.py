@@ -26,6 +26,7 @@ class SiteSchema(Enum):
     NexusPhp = "NexusPhp"
     NexusProject = "NexusProject"
     NexusRabbit = "NexusRabbit"
+    NexusHhanclub = "NexusHhanclub"
     SmallHorse = "Small Horse"
     Unit3d = "Unit3d"
     TorrentLeech = "TorrentLeech"
@@ -246,8 +247,8 @@ class ISiteUserInfo(metaclass=ABCMeta):
                 logger.warn(
                     f"{self.site_name} 检测到Cloudflare，请更新Cookie和UA")
                 return ""
-            if "charset=utf-8" in res.text or "charset=UTF-8" in res.text:
-                res.encoding = "UTF-8"
+            if re.search(r"charset=\"?utf-8\"?", res.text, re.IGNORECASE):
+                res.encoding = "utf-8"
             else:
                 res.encoding = res.apparent_encoding
             return res.text

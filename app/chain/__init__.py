@@ -16,9 +16,10 @@ from app.core.context import MediaInfo, TorrentInfo
 from app.core.event import EventManager
 from app.core.meta import MetaBase
 from app.core.module import ModuleManager
+from app.helper.format import FormatParser
 from app.log import logger
 from app.schemas import TransferInfo, TransferTorrent, ExistMediaInfo, DownloadingTorrent, CommingMessage, Notification, \
-    WebhookEventInfo, EpisodeFormat
+    WebhookEventInfo
 from app.schemas.types import TorrentStatus, MediaType, MediaImageType, EventType
 from app.utils.object import ObjectUtils
 
@@ -271,34 +272,31 @@ class ChainBase(metaclass=ABCMeta):
         """
         return self.run_module("list_torrents", status=status, hashs=hashs)
 
-    def transfer(self, path: Path, mediainfo: MediaInfo,
+    def transfer(self, path: Path, meta: MetaBase, mediainfo: MediaInfo,
                  transfer_type: str,
                  target: Path = None,
-                 meta: MetaBase = None,
-                 epformat: EpisodeFormat = None,
-                 min_filesize: int = 0) -> Optional[TransferInfo]:
+                 formater: FormatParser = None) -> Optional[TransferInfo]:
         """
         文件转移
         :param path:  文件路径
+        :param meta: 预识别的元数据
         :param mediainfo:  识别的媒体信息
         :param transfer_type:  转移模式
         :param target:  转移目标路径
-        :param meta: 预识别的元数据，仅单文件转移时传递
-        :param epformat:  自定义剧集识别格式
-        :param min_filesize:  最小文件大小
+        :param formater:  自定义剧集识别格式
         :return: {path, target_path, message}
         """
-        return self.run_module("transfer", path=path, mediainfo=mediainfo,
-                               transfer_type=transfer_type, target=target, meta=meta,
-                               epformat=epformat, min_filesize=min_filesize)
+        return self.run_module("transfer", path=path, meta=meta, mediainfo=mediainfo,
+                               transfer_type=transfer_type, target=target,
+                               formater=formater)
 
-    def transfer_completed(self, hashs: Union[str, list], transinfo: TransferInfo = None) -> None:
+    def transfer_completed(self, hashs: Union[str, list], path: Path = None) -> None:
         """
         转移完成后的处理
         :param hashs:  种子Hash
-        :param transinfo:  转移信息
+        :param path:  源目录
         """
-        return self.run_module("transfer_completed", hashs=hashs, transinfo=transinfo)
+        return self.run_module("transfer_completed", hashs=hashs, path=path)
 
     def remove_torrents(self, hashs: Union[str, list]) -> bool:
         """

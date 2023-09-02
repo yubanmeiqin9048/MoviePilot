@@ -95,11 +95,18 @@ class SystemUtils:
         """
         获取目录下所有指定扩展名的文件（包括子目录）
         """
+
+        if not min_filesize:
+            min_filesize = 0
+
         if not directory.exists():
             return []
 
         if directory.is_file():
             return [directory]
+            
+        if not min_filesize:
+            min_filesize = 0
 
         files = []
         pattern = r".*(" + "|".join(extensions) + ")$"

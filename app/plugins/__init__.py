@@ -5,7 +5,7 @@ from typing import Any, List, Dict, Tuple
 from app.chain import ChainBase
 from app.core.config import settings
 from app.core.event import EventManager
-from app.db import SessionLocal
+from app.db import ScopedSession
 from app.db.models import Base
 from app.db.plugindata_oper import PluginDataOper
 from app.db.systemconfig_oper import SystemConfigOper
@@ -17,9 +17,7 @@ class PluginChian(ChainBase):
     """
     插件处理链
     """
-
-    def process(self, *args, **kwargs):
-        pass
+    pass
 
 
 class _PluginBase(metaclass=ABCMeta):
@@ -39,7 +37,7 @@ class _PluginBase(metaclass=ABCMeta):
 
     def __init__(self):
         # 数据库连接
-        self.db = SessionLocal()
+        self.db = ScopedSession()
         # 插件数据
         self.plugindata = PluginDataOper(self.db)
         # 处理链
@@ -185,3 +183,13 @@ class _PluginBase(metaclass=ABCMeta):
             channel=channel, mtype=mtype, title=title, text=text,
             image=image, link=link, userid=userid
         ))
+
+    def close(self):
+        """
+        关闭数据库连接
+        """
+        if self.db:
+            self.db.close()
+
+    def __del__(self):
+        self.close()

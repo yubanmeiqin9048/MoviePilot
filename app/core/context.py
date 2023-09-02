@@ -252,6 +252,15 @@ class MediaInfo:
         """
         setattr(self, f"{name}_path", image)
 
+    def get_image(self, name: str):
+        """
+        获取图片地址
+        """
+        try:
+            return getattr(self, f"{name}_path")
+        except AttributeError:
+            return None
+
     def set_category(self, cat: str):
         """
         设置二级分类
@@ -446,6 +455,8 @@ class MediaInfo:
             self.poster_path = info.get("pic", {}).get("large")
             if not self.poster_path and info.get("cover_url"):
                 self.poster_path = info.get("cover_url")
+            if not self.poster_path and info.get("cover"):
+                self.poster_path = info.get("cover").get("url")
         # 简介
         if not self.overview:
             self.overview = info.get("intro") or info.get("card_subtitle") or ""

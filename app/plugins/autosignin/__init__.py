@@ -114,51 +114,69 @@ class AutoSignIn(_PluginBase):
                 self.__update_config()
 
             # 周期运行
-            if self._enabled and self._cron:
-                try:
-                    if self._cron.strip().count(" ") == 4:
-                        self._scheduler.add_job(func=self.sign_in,
-                                                trigger=CronTrigger.from_crontab(self._cron),
-                                                name=f"站点自动{self._action}")
-                        logger.info(f"站点自动{self._action}服务启动，执行周期 {self._cron}")
-                    else:
-                        # 2.3/9-23
-                        crons = self._cron.strip().split("/")
-                        if len(crons) == 2:
-                            # 2.3
-                            self._cron = crons[0]
-                            # 9-23
-                            times = crons[1].split("-")
-                            if len(times) == 2:
-                                # 9
-                                self._start_time = int(times[0])
-                                # 23
-                                self._end_time = int(times[1])
-                        if self._start_time and self._end_time:
+            if self._enabled:
+                if self._cron:
+                    try:
+                        if self._cron.strip().count(" ") == 4:
                             self._scheduler.add_job(func=self.sign_in,
-                                                    trigger="interval",
-                                                    hours=float(self._cron.strip()),
+                                                    trigger=CronTrigger.from_crontab(self._cron),
                                                     name=f"站点自动{self._action}")
-                            logger.info(f"站点自动{self._action}服务启动，执行周期 {self._cron} {self._start_time}-{self._end_time}")
+                            logger.info(f"站点自动{self._action}服务启动，执行周期 {self._cron}")
                         else:
-                            logger.error(f"站点自动{self._action}服务启动失败，周期格式错误")
-                            # 推送实时消息
-                            self.systemmessage.put(f"执行周期配置错误")
-                except Exception as err:
-                    logger.error(f"定时任务配置错误：{err}")
-                    # 推送实时消息
-                    self.systemmessage.put(f"执行周期配置错误：{err}")
-            else:
-                # 随机时间
-                triggers = TimerUtils.random_scheduler(num_executions=2,
-                                                       begin_hour=9,
-                                                       end_hour=23,
-                                                       max_interval=12 * 60,
-                                                       min_interval=6 * 60)
-                for trigger in triggers:
-                    self._scheduler.add_job(self.sign_in, "cron",
-                                            hour=trigger.hour, minute=trigger.minute,
-                                            name=f"站点自动{self._action}")
+                            # 2.3/9-23
+                            crons = self._cron.strip().split("/")
+                            if len(crons) == 2:
+                                # 2.3
+                                self._cron = crons[0]
+                                # 9-23
+                                times = crons[1].split("-")
+                                if len(times) == 2:
+                                    # 9
+                                    self._start_time = int(times[0])
+                                    # 23
+                                    self._end_time = int(times[1])
+                                if self._start_time and self._end_time:
+                                    self._scheduler.add_job(func=self.sign_in,
+                                                            trigger="interval",
+                                                            hours=float(self._cron.strip()),
+                                                            name=f"站点自动{self._action}")
+                                    logger.info(
+                                        f"站点自动{self._action}服务启动，执行周期 {self._start_time}点-{self._end_time}点 每{self._cron}小时执行一次")
+                                else:
+                                    logger.error(f"站点自动{self._action}服务启动失败，周期格式错误")
+                                    # 推送实时消息
+                                    self.systemmessage.put(f"执行周期配置错误")
+                                    self._cron = ""
+                                    self._enabled = False
+                                    self.__update_config()
+                            else:
+                                # 默认0-24 按照周期运行
+                                self._start_time = 0
+                                self._end_time = 24
+                                self._scheduler.add_job(func=self.sign_in,
+                                                        trigger="interval",
+                                                        hours=float(self._cron.strip()),
+                                                        name=f"站点自动{self._action}")
+                                logger.info(
+                                    f"站点自动{self._action}服务启动，执行周期 {self._start_time}点-{self._end_time}点 每{self._cron}小时执行一次")
+                    except Exception as err:
+                        logger.error(f"定时任务配置错误：{err}")
+                        # 推送实时消息
+                        self.systemmessage.put(f"执行周期配置错误：{err}")
+                        self._cron = ""
+                        self._enabled = False
+                        self.__update_config()
+                else:
+                    # 随机时间
+                    triggers = TimerUtils.random_scheduler(num_executions=2,
+                                                           begin_hour=9,
+                                                           end_hour=23,
+                                                           max_interval=12 * 60,
+                                                           min_interval=6 * 60)
+                    for trigger in triggers:
+                        self._scheduler.add_job(self.sign_in, "cron",
+                                                hour=trigger.hour, minute=trigger.minute,
+                                                name=f"站点自动{self._action}")
 
             # 启动任务
             if self._scheduler.get_jobs():
@@ -302,7 +320,7 @@ class AutoSignIn(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 3
+                                    'md': 6
                                 },
                                 'content': [
                                     {
@@ -322,7 +340,7 @@ class AutoSignIn(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 3
+                                    'md': 6
                                 },
                                 'content': [
                                     {
@@ -339,7 +357,7 @@ class AutoSignIn(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 3
+                                    'md': 6
                                 },
                                 'content': [
                                     {
@@ -355,7 +373,7 @@ class AutoSignIn(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 3
+                                    'md': 6
                                 },
                                 'content': [
                                     {
@@ -363,7 +381,7 @@ class AutoSignIn(_PluginBase):
                                         'props': {
                                             'model': 'retry_keyword',
                                             'label': '重试关键词',
-                                            'placeholder': '重新签到关键词，支持正则表达式；每天首次全签，后续如果设置了重试词则只签到命中重试词的站点，否则全签。'
+                                            'placeholder': '支持正则表达式，命中才重签'
                                         }
                                     }
                                 ]

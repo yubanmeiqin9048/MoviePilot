@@ -20,11 +20,10 @@ from app.core.metainfo import MetaInfo
 from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.db.transferhistory_oper import TransferHistoryOper
 from app.log import logger
-from app.modules.qbittorrent import Qbittorrent
-from app.modules.transmission import Transmission
 from app.plugins import _PluginBase
 from app.schemas import Notification, NotificationType, TransferInfo
 from app.schemas.types import EventType, MediaType
+from app.utils.string import StringUtils
 from app.utils.system import SystemUtils
 
 lock = threading.Lock()
@@ -90,8 +89,6 @@ class DirMonitor(_PluginBase):
     _exclude_keywords = ""
     # 存储源目录与目的目录关系
     _dirconf: Dict[str, Path] = {}
-    qb = None
-    tr = None
     _medias = {}
     # 退出事件
     _event = Event()
@@ -117,8 +114,6 @@ class DirMonitor(_PluginBase):
         self.stop_service()
 
         if self._enabled:
-            self.qb = Qbittorrent()
-            self.tr = Transmission()
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
 
             # 启动任务
@@ -294,8 +289,7 @@ class DirMonitor(_PluginBase):
                         return
 
                     # 获取downloadhash
-                    download_hash = self.get_download_hash(src=file_path,
-                                                           tmdb_id=mediainfo.tmdb_id)
+                    download_hash = self.get_download_hash(src=str(file_path))
 
                     target_path = str(transferinfo.file_list_new[0]) if transferinfo.file_list_new else str(
                         transferinfo.target_path)
@@ -383,7 +377,7 @@ class DirMonitor(_PluginBase):
                         }
                     self._medias[mediainfo.title_year + " " + meta.season] = media_list
 
-                    # 刷新媒体库
+                    # 汇总刷新媒体库
                     self.chain.refresh_mediaserver(mediainfo=mediainfo, file_path=target_path)
                     # 广播事件
                     self.eventmanager.send_event(EventType.TransferComplete, {
@@ -457,29 +451,10 @@ class DirMonitor(_PluginBase):
                     # 剧集季集信息 S01 E01-E04 || S01 E01、E02、E04
                     season_episode = None
                     # 处理文件多，说明是剧集，显示季入库消息
-                    if mediainfo.type == MediaType.TV and len(episodes) > 1:
-                        # 剧集季
-                        season = "S%s" % str(file_meta.begin_season).rjust(2, "0")
-
-                        # 剧集按照升序排序
-                        episodes.sort()
-                        # 开始、结束index
-                        start = int(episodes[0])
-                        end = int(episodes[len(episodes) - 1])
-
-                        # 开始结束间所有的元素 1,2,3,4
-                        all_ele = [i for i in range(start, end + 1)]
-                        # 本次剧集组所有的元素 1,2,4
-                        episode_ele = [int(e) for e in episodes]
-
-                        # 如果本次剧集组所有元素=开始结束间所有元素，则表示区间内 S01 E01-E04
-                        if all_ele == episode_ele:
-                            season_episode = f"{season} E{str(episodes[0]).rjust(2, '0')}-E{str(episodes[len(episodes) - 1]).rjust(2, '0')}"
-                        else:
-                            # 否则所有剧集组逗号分隔显示 S01 E01、E02、E04
-                            episodes = ["E%s" % str(episode).rjust(2, "0") for episode in episodes]
-                            season_episode = f"{season} {'、'.join(episodes)}"
-
+                    if mediainfo.type == MediaType.TV:
+                        # 季集文本
+                        season_episode = f"{file_meta.season} {StringUtils.format_ep(episodes)}"
+                    # 发送消息
                     self.transferchian.send_transfer_message(meta=file_meta,
                                                              mediainfo=mediainfo,
                                                              transferinfo=transferinfo,
@@ -488,65 +463,13 @@ class DirMonitor(_PluginBase):
                 del self._medias[medis_title_year_season]
                 continue
 
-    def get_download_hash(self, src: Path, tmdb_id: int):
+    def get_download_hash(self, src: str):
         """
-        获取download_hash
+        从表中获取download_hash，避免连接下载器
         """
-        file_name = src.name
-        downloadHis = self.downloadhis.get_last_by(tmdbid=tmdb_id)
+        downloadHis = self.downloadhis.get_file_by_fullpath(src)
         if downloadHis:
-            for his in downloadHis:
-                # qb
-                if settings.DOWNLOADER == "qbittorrent":
-                    files = self.qb.get_files(tid=his.download_hash)
-                    if files:
-                        for file in files:
-                            torrent_file_name = file.get("name")
-                            if file_name == Path(torrent_file_name).name:
-                                return his.download_hash
-                # tr
-                if settings.DOWNLOADER == "transmission":
-                    files = self.tr.get_files(tid=his.download_hash)
-                    if files:
-                        for file in files:
-                            torrent_file_name = file.name
-                            if file_name == Path(torrent_file_name).name:
-                                return his.download_hash
-
-        # 尝试获取下载任务补充download_hash
-        logger.debug(f"转移记录 {src} 缺失download_hash，尝试补充……")
-
-        # 获取tr、qb所有种子
-        qb_torrents, _ = self.qb.get_torrents()
-        tr_torrents, _ = self.tr.get_torrents()
-
-        # 种子名称
-        torrent_name = str(src).split("/")[-1]
-        torrent_name2 = str(src).split("/")[-2]
-
-        # 处理下载器
-        for torrent in qb_torrents:
-            if str(torrent.get("name")) == str(torrent_name) \
-                    or str(torrent.get("name")) == str(torrent_name2):
-                files = self.qb.get_files(tid=torrent.get("hash"))
-                if files:
-                    for file in files:
-                        torrent_file_name = file.get("name")
-                        if file_name == Path(torrent_file_name).name:
-                            return torrent.get("hash")
-
-        # 处理辅种器 遍历所有种子，按照添加时间升序
-        if len(tr_torrents) > 0:
-            tr_torrents = sorted(tr_torrents, key=lambda x: x.added_date)
-        for torrent in tr_torrents:
-            if str(torrent.get("name")) == str(torrent_name) \
-                    or str(torrent.get("name")) == str(torrent_name2):
-                files = self.tr.get_files(tid=torrent.get("hashString"))
-                if files:
-                    for file in files:
-                        torrent_file_name = file.name
-                        if file_name == Path(torrent_file_name).name:
-                            return torrent.get("hashString")
+            return downloadHis.download_hash
         return None
 
     def get_state(self) -> bool:

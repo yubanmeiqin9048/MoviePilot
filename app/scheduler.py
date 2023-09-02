@@ -12,7 +12,7 @@ from app.chain.rss import RssChain
 from app.chain.subscribe import SubscribeChain
 from app.chain.transfer import TransferChain
 from app.core.config import settings
-from app.db import SessionLocal
+from app.db import ScopedSession
 from app.log import logger
 from app.utils.singleton import Singleton
 from app.utils.timer import TimerUtils
@@ -40,7 +40,7 @@ class Scheduler(metaclass=Singleton):
 
     def __init__(self):
         # 数据库连接
-        self._db = SessionLocal()
+        self._db = ScopedSession()
         # 调试模式不启动定时服务
         if settings.DEV:
             return
@@ -62,6 +62,9 @@ class Scheduler(metaclass=Singleton):
         # 新增订阅时搜索（5分钟检查一次）
         self._scheduler.add_job(SubscribeChain(self._db).search, "interval",
                                 minutes=5, kwargs={'state': 'N'})
+
+        # 检查更新订阅TMDB数据（每隔24小时）
+        self._scheduler.add_job(SubscribeChain(self._db).check, "interval", hours=24)
 
         # 订阅状态每隔24小时搜索一次
         if settings.SUBSCRIBE_SEARCH:
