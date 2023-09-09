@@ -226,12 +226,13 @@ class Jellyfin(metaclass=Singleton):
             logger.error(f"连接Items/Counts出错：" + str(e))
             return {}
 
-    def __get_jellyfin_series_id_by_name(self, name: str, year: str) -> Optional[str]:
+    def __get_jellyfin_series_id_by_name(self, name: str) -> List[str]:
         """
         根据名称查询Jellyfin中剧集的SeriesId
         """
         if not self._host or not self._apikey or not self.user:
             return None
+        item_ids = []
         req_url = "%sUsers/%s/Items?api_key=%s&searchTerm=%s&IncludeItemTypes=Series&Limit=10&Recursive=true" % (
             self._host, self.user, self._apikey, name)
         try:
@@ -240,13 +241,12 @@ class Jellyfin(metaclass=Singleton):
                 res_items = res.json().get("Items")
                 if res_items:
                     for res_item in res_items:
-                        if res_item.get('Name') == name and (
-                                not year or str(res_item.get('ProductionYear')) == str(year)):
-                            return res_item.get('Id')
+                        if res_item.get('Name') == name:
+                            item_ids.append(res_item.get('Id'))
         except Exception as e:
             logger.error(f"连接Items出错：" + str(e))
-            return None
-        return ""
+            return []
+        return item_ids
 
     def get_movies(self, title: str, year: str = None) -> Optional[List[dict]]:
         """
@@ -277,14 +277,14 @@ class Jellyfin(metaclass=Singleton):
         return []
 
     def get_tv_episodes(self,
-                        item_id: str = None,
+                        item_ids: List[str] = [],
                         title: str = None,
                         year: str = None,
                         tmdb_id: int = None,
                         season: int = None) -> Optional[Dict[int, list]]:
         """
         根据标题和年份和季，返回Jellyfin中的剧集列表
-        :param item_id: Jellyfin中的Id
+        :param item_ids: Jellyfin中的Id列表
         :param title: 标题
         :param year: 年份
         :param tmdb_id: TMDBID
@@ -294,44 +294,42 @@ class Jellyfin(metaclass=Singleton):
         if not self._host or not self._apikey or not self.user:
             return None
         # 查TVID
-        if not item_id:
-            item_id = self.__get_jellyfin_series_id_by_name(title, year)
-            if item_id is None:
-                return None
-            if not item_id:
-                return {}
-        # 验证tmdbid是否相同
-        item_tmdbid = (self.get_iteminfo(item_id).get("ProviderIds") or {}).get("Tmdb")
-        if tmdb_id and item_tmdbid:
-            if str(tmdb_id) != str(item_tmdbid):
-                return {}
+        season_episodes = {}
+        item_id_by_name = []
         if not season:
             season = ""
-        try:
-            req_url = "%sShows/%s/Episodes?season=%s&&userId=%s&isMissing=false&api_key=%s" % (
-                self._host, item_id, season, self.user, self._apikey)
-            res_json = RequestUtils().get_res(req_url)
-            if res_json:
-                res_items = res_json.json().get("Items")
-                # 返回的季集信息
-                season_episodes = {}
-                for res_item in res_items:
-                    season_index = res_item.get("ParentIndexNumber")
-                    if not season_index:
-                        continue
-                    if season and season != season_index:
-                        continue
-                    episode_index = res_item.get("IndexNumber")
-                    if not episode_index:
-                        continue
-                    if not season_episodes.get(season_index):
-                        season_episodes[season_index] = []
-                    season_episodes[season_index].append(episode_index)
-                return season_episodes
-        except Exception as e:
-            logger.error(f"连接Shows/Id/Episodes出错：" + str(e))
-            return None
-        return {}
+        item_id_by_name = self.__get_jellyfin_series_id_by_name(title)
+        if item_id_by_name:
+            item_ids=item_id_by_name
+        for item_id in item_ids:
+            # 验证tmdbid是否相同
+            item_tmdbid = self.get_iteminfo(item_id).get("ProviderIds", {}).get("Tmdb")
+            if tmdb_id and item_tmdbid:
+                if str(tmdb_id) != str(item_tmdbid):
+                    continue
+            try:
+                req_url = "%sShows/%s/Episodes?season=%s&&userId=%s&isMissing=false&api_key=%s" % (
+                    self._host, item_id, season, self.user, self._apikey)
+                res_json = RequestUtils().get_res(req_url)
+                if res_json:
+                    res_items = res_json.json().get("Items")
+                    # 返回的季集信息
+                    for res_item in res_items:
+                        season_index = res_item.get("ParentIndexNumber")
+                        if not season_index:
+                            continue
+                        if season and season != season_index:
+                            continue
+                        episode_index = res_item.get("IndexNumber")
+                        if not episode_index:
+                            continue
+                        if not season_episodes.get(season_index):
+                            season_episodes[season_index] = []
+                        season_episodes[season_index].append(episode_index)
+            except Exception as e:
+                logger.error(f"连接Shows/Id/Episodes出错：" + str(e))
+                return None
+        return season_episodes
 
     def get_remote_image_by_id(self, item_id: str, image_type: str) -> Optional[str]:
         """
