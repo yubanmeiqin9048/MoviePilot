@@ -3,6 +3,7 @@ from typing import List, Any, Dict, Tuple
 
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.module import ModuleHelper
+from app.helper.sites import SitesHelper
 from app.log import logger
 from app.schemas.types import SystemConfigKey
 from app.utils.object import ObjectUtils
@@ -23,6 +24,7 @@ class PluginManager(metaclass=Singleton):
     _config_key: str = "plugin.%s"
 
     def __init__(self):
+        self.siteshelper = SitesHelper()
         self.init_config()
 
     def init_config(self):
@@ -82,7 +84,8 @@ class PluginManager(metaclass=Singleton):
         # 停止所有插件
         for plugin in self._running_plugins.values():
             # 关闭数据库
-            plugin.close()
+            if hasattr(plugin, "close"):
+                plugin.close()
             # 关闭插件
             if hasattr(plugin, "stop_service"):
                 plugin.stop_service()
@@ -183,6 +186,8 @@ class PluginManager(metaclass=Singleton):
         # 已安装插件
         installed_apps = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins) or []
         for pid, plugin in self._plugins.items():
+            # 运行状插件
+            plugin_obj = self._running_plugins.get(pid)
             # 基本属性
             conf = {}
             # ID
@@ -193,11 +198,20 @@ class PluginManager(metaclass=Singleton):
             else:
                 conf.update({"installed": False})
             # 运行状态
-            if pid in self._running_plugins.keys() and hasattr(plugin, "get_state"):
-                plugin_obj = self._running_plugins.get(pid)
+            if plugin_obj and hasattr(plugin, "get_state"):
                 conf.update({"state": plugin_obj.get_state()})
             else:
                 conf.update({"state": False})
+            # 是否有详情页面
+            if hasattr(plugin, "get_page"):
+                if ObjectUtils.check_method(plugin.get_page):
+                    conf.update({"has_page": True})
+                else:
+                    conf.update({"has_page": False})
+            # 权限
+            if hasattr(plugin, "auth_level"):
+                if self.siteshelper.auth_level < plugin.auth_level:
+                    continue
             # 名称
             if hasattr(plugin, "plugin_name"):
                 conf.update({"plugin_name": plugin.plugin_name})

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 使用 `envsubst` 将模板文件中的 ${NGINX_PORT} 替换为实际的环境变量值
-envsubst '${NGINX_PORT}' < /etc/nginx/nginx.template.conf > /etc/nginx/nginx.conf
+envsubst '${NGINX_PORT}${PORT}' < /etc/nginx/nginx.template.conf > /etc/nginx/nginx.conf
 # 自动更新
 if [ "${MOVIEPILOT_AUTO_UPDATE}" = "true" ]; then
     cd /
@@ -26,6 +26,10 @@ chown moviepilot:moviepilot /etc/hosts /tmp
 gosu moviepilot:moviepilot playwright install chromium
 # 启动前端nginx服务
 nginx
+# 启动haproxy
+if [ -S "/var/run/docker.sock" ]; then
+    haproxy -f /app/haproxy.cfg
+fi
 # 设置后端服务权限掩码
 umask ${UMASK}
 # 启动后端服务

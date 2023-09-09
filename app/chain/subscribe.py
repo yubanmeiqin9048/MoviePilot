@@ -33,7 +33,7 @@ class SubscribeChain(ChainBase):
         self.subscribeoper = SubscribeOper(self._db)
         self.torrentschain = TorrentsChain()
         self.message = MessageHelper()
-        self.systemconfig = SystemConfigOper(self._db)
+        self.systemconfig = SystemConfigOper()
 
     def add(self, title: str, year: str,
             mtype: MediaType = None,
@@ -375,14 +375,14 @@ class SubscribeChain(ChainBase):
 
     def refresh(self):
         """
-        刷新订阅
+        订阅刷新
         """
         # 查询所有订阅
         subscribes = self.subscribeoper.list('R')
         if not subscribes:
             # 没有订阅不运行
             return
-        # 刷新站点资源，从缓存中匹配订阅
+        # 触发刷新站点资源，从缓存中匹配订阅
         self.match(
             self.torrentschain.refresh()
         )
@@ -782,8 +782,9 @@ class SubscribeChain(ChainBase):
                         # 没有自定义总集数
                         total_episode = total
                     # 新的集列表
-                    episodes = list(range(start_episode, total_episode + 1))
-
+                    new_episodes = list(range(max(start_episode, start), total_episode + 1))
+                    # 与原集列表取交集
+                    episodes = list(set(episode_list).intersection(set(new_episodes)))
                 # 更新集合
                 no_exists[tmdb_id][begin_season] = NotExistMediaInfo(
                     season=begin_season,

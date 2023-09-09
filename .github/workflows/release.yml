@@ -14,7 +14,7 @@ jobs:
     steps:
       -
         name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       -
         name: Release Version
@@ -28,8 +28,9 @@ jobs:
         uses: actions/create-release@latest
         with:
           tag_name: v${{ env.app_version }}
-          name: v${{ env.app_version }}
-          body: ${{ github.event.commits[0].message }}
+          release_name: v${{ env.app_version }}
+          body: |
+            ${{ github.event.commits[0].message }}
           draft: false
           prerelease: false
         env:

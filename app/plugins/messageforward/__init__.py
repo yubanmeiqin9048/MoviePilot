@@ -31,7 +31,7 @@ class MessageForward(_PluginBase):
     # 加载顺序
     plugin_order = 16
     # 可使用的用户级别
-    auth_level = 2
+    auth_level = 1
 
     # 私有属性
     _enabled = False
@@ -69,81 +69,81 @@ class MessageForward(_PluginBase):
         拼装插件配置页面，需要返回两块数据：1、页面配置；2、数据结构
         """
         return [
-            {
-                'component': 'VForm',
-                'content': [
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 6
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'enabled',
-                                            'label': '开启转发'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextarea',
-                                        'props': {
-                                            'model': 'wechat',
-                                            'rows': '3',
-                                            'label': '应用配置',
-                                            'placeholder': 'appid:corpid:appsecret（一行一个配置）'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextarea',
-                                        'props': {
-                                            'model': 'pattern',
-                                            'rows': '3',
-                                            'label': '正则配置',
-                                            'placeholder': '对应上方应用配置，一行一个，一一对应'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                ]
-            }
-        ], {
-            "enabled": False,
-            "wechat": "",
-            "pattern": ""
-        }
+                   {
+                       'component': 'VForm',
+                       'content': [
+                           {
+                               'component': 'VRow',
+                               'content': [
+                                   {
+                                       'component': 'VCol',
+                                       'props': {
+                                           'cols': 12,
+                                           'md': 6
+                                       },
+                                       'content': [
+                                           {
+                                               'component': 'VSwitch',
+                                               'props': {
+                                                   'model': 'enabled',
+                                                   'label': '开启转发'
+                                               }
+                                           }
+                                       ]
+                                   },
+                               ]
+                           },
+                           {
+                               'component': 'VRow',
+                               'content': [
+                                   {
+                                       'component': 'VCol',
+                                       'props': {
+                                           'cols': 12,
+                                       },
+                                       'content': [
+                                           {
+                                               'component': 'VTextarea',
+                                               'props': {
+                                                   'model': 'wechat',
+                                                   'rows': '3',
+                                                   'label': '应用配置',
+                                                   'placeholder': 'appid:corpid:appsecret（一行一个配置）'
+                                               }
+                                           }
+                                       ]
+                                   }
+                               ]
+                           },
+                           {
+                               'component': 'VRow',
+                               'content': [
+                                   {
+                                       'component': 'VCol',
+                                       'props': {
+                                           'cols': 12,
+                                       },
+                                       'content': [
+                                           {
+                                               'component': 'VTextarea',
+                                               'props': {
+                                                   'model': 'pattern',
+                                                   'rows': '3',
+                                                   'label': '正则配置',
+                                                   'placeholder': '对应上方应用配置，一行一个，一一对应'
+                                               }
+                                           }
+                                       ]
+                                   }
+                               ]
+                           },
+                       ]
+                   }
+               ], {
+                   "enabled": False,
+                   "wechat": "",
+                   "pattern": ""
+               }
 
     def get_page(self) -> List[dict]:
         pass
@@ -169,29 +169,27 @@ class MessageForward(_PluginBase):
 
         # 正则匹配
         patterns = self._pattern.split("\n")
-        for i, pattern in enumerate(patterns):
+        for index, pattern in enumerate(patterns):
             msg_match = re.search(pattern, title)
             if msg_match:
-                access_token, appid = self.__flush_access_token(i)
+                access_token, appid = self.__flush_access_token(index)
                 if not access_token:
+                    logger.error("未获取到有效token，请检查配置")
                     continue
 
                 # 发送消息
                 if image:
-                    self.__send_image_message(title, text, image, userid, access_token, appid, i)
+                    self.__send_image_message(title, text, image, userid, access_token, appid, index)
                 else:
-                    self.__send_message(title, text, userid, access_token, appid, i)
+                    self.__send_message(title, text, userid, access_token, appid, index)
 
     def __save_wechat_token(self):
         """
         获取并存储wechat token
         """
-        # 查询历史
-        wechat_token_history = self.get_data("wechat_token") or {}
-
         # 解析配置
         wechats = self._wechat.split("\n")
-        for i, wechat in enumerate(wechats):
+        for index, wechat in enumerate(wechats):
             wechat_config = wechat.split(":")
             if len(wechat_config) != 3:
                 logger.error(f"{wechat} 应用配置不正确")
@@ -200,53 +198,30 @@ class MessageForward(_PluginBase):
             corpid = wechat_config[1]
             appsecret = wechat_config[2]
 
-            # 查询历史是否存储token
-            wechat_config = wechat_token_history.get("appid")
-            access_token = None
-            expires_in = None
-            access_token_time = None
-            if wechat_config:
-                access_token_time = wechat_config['access_token_time']
-                expires_in = wechat_config['expires_in']
-                # 判断token是否过期
-                if (datetime.now() - access_token_time).seconds < expires_in:
-                    # 重新获取token
-                    access_token, expires_in, access_token_time = self.__get_access_token(corpid=corpid,
-                                                                                          appsecret=appsecret)
+            # 已过期，重新获取token
+            access_token, expires_in, access_token_time = self.__get_access_token(corpid=corpid,
+                                                                                  appsecret=appsecret)
             if not access_token:
-                # 获取token
-                access_token, expires_in, access_token_time = self.__get_access_token(corpid=corpid,
-                                                                                      appsecret=appsecret)
-            if access_token:
-                wechat_token_history[appid] = {
-                    "access_token": access_token,
-                    "expires_in": expires_in,
-                    "access_token_time": str(access_token_time),
-                    "corpid": corpid,
-                    "appsecret": appsecret
-                }
-                self._pattern_token[i] = {
-                    "appid": appid,
-                    "corpid": corpid,
-                    "appsecret": appsecret,
-                    "access_token": access_token,
-                    "expires_in": expires_in,
-                    "access_token_time": access_token_time,
-                }
-            else:
+                # 没有token，获取token
                 logger.error(f"wechat配置 appid = {appid} 获取token失败，请检查配置")
+                continue
 
-        # 保存wechat token
-        if wechat_token_history:
-            self.save_data("wechat_token", wechat_token_history)
+            self._pattern_token[index] = {
+                "appid": appid,
+                "corpid": corpid,
+                "appsecret": appsecret,
+                "access_token": access_token,
+                "expires_in": expires_in,
+                "access_token_time": access_token_time,
+            }
 
-    def __flush_access_token(self, i: int):
+    def __flush_access_token(self, index: int, force: bool = False):
         """
         获取第i个配置wechat token
         """
-        wechat_token = self._pattern_token[i]
+        wechat_token = self._pattern_token[index]
         if not wechat_token:
-            logger.error(f"未获取到第 {i} 条正则对应的wechat应用token，请检查配置")
+            logger.error(f"未获取到第 {index} 条正则对应的wechat应用token，请检查配置")
             return None
         access_token = wechat_token['access_token']
         expires_in = wechat_token['expires_in']
@@ -256,7 +231,7 @@ class MessageForward(_PluginBase):
         appsecret = wechat_token['appsecret']
 
         # 判断token有效期
-        if (datetime.now() - access_token_time).seconds < expires_in:
+        if force or (datetime.now() - access_token_time).seconds >= expires_in:
             # 重新获取token
             access_token, expires_in, access_token_time = self.__get_access_token(corpid=corpid,
                                                                                   appsecret=appsecret)
@@ -264,7 +239,7 @@ class MessageForward(_PluginBase):
                 logger.error(f"wechat配置 appid = {appid} 获取token失败，请检查配置")
                 return None, None
 
-        self._pattern_token[i] = {
+        self._pattern_token[index] = {
             "appid": appid,
             "corpid": corpid,
             "appsecret": appsecret,
@@ -275,8 +250,7 @@ class MessageForward(_PluginBase):
         return access_token, appid
 
     def __send_message(self, title: str, text: str = None, userid: str = None, access_token: str = None,
-                       appid: str = None, i: int = None) -> \
-            Optional[bool]:
+                       appid: str = None, index: int = None) -> Optional[bool]:
         """
         发送文本消息
         :param title: 消息标题
@@ -284,7 +258,6 @@ class MessageForward(_PluginBase):
         :param userid: 消息发送对象的ID，为空则发给所有人
         :return: 发送状态，错误信息
         """
-        message_url = self._send_msg_url % access_token
         if text:
             conent = "%s\n%s" % (title, text.replace("\n\n", "\n"))
         else:
@@ -303,10 +276,10 @@ class MessageForward(_PluginBase):
             "enable_id_trans": 0,
             "enable_duplicate_check": 0
         }
-        return self.__post_request(message_url, req_json, i, title)
+        return self.__post_request(access_token=access_token, req_json=req_json, index=index, title=title)
 
-    def __send_image_message(self, title: str, text: str, image_url: str, userid: str = None, access_token: str = None,
-                             appid: str = None, i: int = None) -> Optional[bool]:
+    def __send_image_message(self, title: str, text: str, image_url: str, userid: str = None,
+                             access_token: str = None, appid: str = None, index: int = None) -> Optional[bool]:
         """
         发送图文消息
         :param title: 消息标题
@@ -315,7 +288,6 @@ class MessageForward(_PluginBase):
         :param userid: 消息发送对象的ID，为空则发给所有人
         :return: 发送状态，错误信息
         """
-        message_url = self._send_msg_url % access_token
         if text:
             text = text.replace("\n\n", "\n")
         if not userid:
@@ -335,9 +307,10 @@ class MessageForward(_PluginBase):
                 ]
             }
         }
-        return self.__post_request(message_url, req_json, i, title)
+        return self.__post_request(access_token=access_token, req_json=req_json, index=index, title=title)
 
-    def __post_request(self, message_url: str, req_json: dict, i: int, title: str) -> bool:
+    def __post_request(self, access_token: str, req_json: dict, index: int, title: str, retry: int = 0) -> bool:
+        message_url = self._send_msg_url % access_token
         """
         向微信发送请求
         """
@@ -352,10 +325,21 @@ class MessageForward(_PluginBase):
                     logger.info(f"转发消息 {title} 成功")
                     return True
                 else:
-                    if ret_json.get('errcode') == 42001:
-                        # 重新获取token
-                        self.__flush_access_token(i)
                     logger.error(f"转发消息 {title} 失败，错误信息：{ret_json}")
+                    if ret_json.get('errcode') == 42001 or ret_json.get('errcode') == 40014:
+                        logger.info("token已过期，正在重新刷新token重试")
+                        # 重新获取token
+                        access_token, appid = self.__flush_access_token(index=index,
+                                                                        force=True)
+                        if access_token:
+                            retry += 1
+                            # 重发请求
+                            if retry <= 3:
+                                return self.__post_request(access_token=access_token,
+                                                           req_json=req_json,
+                                                           index=index,
+                                                           title=title,
+                                                           retry=retry)
                     return False
             elif res is not None:
                 logger.error(f"转发消息 {title} 失败，错误码：{res.status_code}，错误原因：{res.reason}")
@@ -364,10 +348,10 @@ class MessageForward(_PluginBase):
                 logger.error(f"转发消息 {title} 失败，未获取到返回信息")
                 return False
         except Exception as err:
-            logger.error(f"转发消息 {title} 失败，错误信息：{err}")
+            logger.error(f"转发消息 {title} 异常，错误信息：{err}")
             return False
 
-    def __get_access_token(self, corpid, appsecret):
+    def __get_access_token(self, corpid: str, appsecret: str):
         """
         获取微信Token
         :return： 微信Token

@@ -41,12 +41,7 @@ def storage(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     查询存储空间信息
     """
-    if settings.LIBRARY_PATH:
-        total_storage, free_storage = SystemUtils.space_usage(
-            [Path(path) for path in settings.LIBRARY_PATH.split(",")]
-        )
-    else:
-        total_storage, free_storage = 0, 0
+    total_storage, free_storage = SystemUtils.space_usage(settings.LIBRARY_PATHS)
     return schemas.Storage(
         total_storage=total_storage,
         used_storage=total_storage - free_storage
@@ -124,3 +119,19 @@ def transfer(days: int = 7, db: Session = Depends(get_db),
     """
     transfer_stat = TransferHistory.statistic(db, days)
     return [stat[1] for stat in transfer_stat]
+
+
+@router.get("/cpu", summary="获取当前CPU使用率", response_model=int)
+def cpu(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
+    """
+    获取当前CPU使用率
+    """
+    return SystemUtils.cpu_usage()
+
+
+@router.get("/memory", summary="获取当前内存使用量和使用率", response_model=List[int])
+def memory(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
+    """
+    获取当前内存使用率
+    """
+    return SystemUtils.memory_usage()

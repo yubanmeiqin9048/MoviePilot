@@ -1,19 +1,17 @@
-import os
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any, List, Dict, Tuple, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 
 from app.core.config import settings
 from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.db.transferhistory_oper import TransferHistoryOper
+from app.log import logger
 from app.modules.qbittorrent import Qbittorrent
 from app.modules.transmission import Transmission
 from app.plugins import _PluginBase
-from typing import Any, List, Dict, Tuple, Optional
-from app.log import logger
 
 
 class SyncDownloadFiles(_PluginBase):
@@ -36,7 +34,7 @@ class SyncDownloadFiles(_PluginBase):
     # 加载顺序
     plugin_order = 20
     # 可使用的用户级别
-    auth_level = 2
+    auth_level = 1
 
     # 私有属性
     _enabled = False
@@ -46,6 +44,7 @@ class SyncDownloadFiles(_PluginBase):
     tr = None
     _onlyonce = False
     _history = False
+    _clear = False
     _downloaders = []
     _dirs = None
     downloadhis = None
@@ -58,21 +57,33 @@ class SyncDownloadFiles(_PluginBase):
         # 停止现有任务
         self.stop_service()
 
+        self.qb = Qbittorrent()
+        self.tr = Transmission()
+        self.downloadhis = DownloadHistoryOper(self.db)
+        self.transferhis = TransferHistoryOper(self.db)
+
         if config:
             self._enabled = config.get('enabled')
             self._time = config.get('time') or 6
             self._history = config.get('history')
+            self._clear = config.get('clear')
             self._onlyonce = config.get("onlyonce")
             self._downloaders = config.get('downloaders') or []
             self._dirs = config.get("dirs") or ""
 
+        if self._clear:
+            # 清理下载器文件记录
+            self.downloadhis.truncate_files()
+            # 清理下载器最后处理记录
+            for downloader in self._downloaders:
+                # 获取最后同步时间
+                self.del_data(f"last_sync_time_{downloader}")
+            # 关闭clear
+            self._clear = False
+            self.__update_config()
+
         if self._onlyonce:
             # 执行一次
-            self.qb = Qbittorrent()
-            self.tr = Transmission()
-            self.downloadhis = DownloadHistoryOper(self.db)
-            self.transferhis = TransferHistoryOper(self.db)
-
             # 关闭onlyonce
             self._onlyonce = False
             self.__update_config()
@@ -86,7 +97,7 @@ class SyncDownloadFiles(_PluginBase):
                 try:
                     self._scheduler.add_job(func=self.sync,
                                             trigger="interval",
-                                            hours=float(self._time.strip()),
+                                            hours=float(str(self._time).strip()),
                                             name="自动同步下载器文件记录")
                     logger.info(f"自动同步下载器文件记录服务启动，时间间隔 {self._time} 小时")
                 except Exception as err:
@@ -151,11 +162,6 @@ class SyncDownloadFiles(_PluginBase):
 
                 # 获取种子download_dir
                 download_dir = self.__get_download_dir(torrent, downloader)
-                # 获取种子name
-                torrent_name = self.__get_torrent_name(torrent, downloader)
-                # 获取种子文件
-                torrent_files = self.__get_torrent_files(torrent, downloader, downloader_obj)
-                logger.info(f"开始同步种子 {hash_str}, 文件数 {len(torrent_files)}")
 
                 # 处理路径映射
                 if self._dirs:
@@ -164,14 +170,39 @@ class SyncDownloadFiles(_PluginBase):
                         sub_paths = path.split(":")
                         download_dir = download_dir.replace(sub_paths[0], sub_paths[1]).replace('\\', '/')
 
+                # 获取种子name
+                torrent_name = self.__get_torrent_name(torrent, downloader)
+                # 种子保存目录
+                save_path = Path(download_dir).joinpath(torrent_name)
+                # 获取种子文件
+                torrent_files = self.__get_torrent_files(torrent, downloader, downloader_obj)
+                logger.info(f"开始同步种子 {hash_str}, 文件数 {len(torrent_files)}")
+
                 download_files = []
                 for file in torrent_files:
-                    file_name = self.__get_file_name(file, downloader)
-                    full_path = Path(download_dir).joinpath(torrent_name, file_name)
+                    # 过滤掉没下载的文件
+                    if not self.__is_download(file, downloader):
+                        continue
+                    # 种子文件路径
+                    file_path_str = self.__get_file_path(file, downloader)
+                    file_path = Path(file_path_str)
+                    # 只处理视频格式
+                    if not file_path.suffix \
+                            or file_path.suffix not in settings.RMT_MEDIAEXT:
+                        continue
+                    # 种子文件根路程
+                    root_path = file_path.parts[0]
+                    # 不含种子名称的种子文件相对路径
+                    if root_path == torrent_name:
+                        rel_path = str(file_path.relative_to(root_path))
+                    else:
+                        rel_path = str(file_path)
+                    # 完整路径
+                    full_path = save_path.joinpath(rel_path)
                     if self._history:
                         transferhis = self.transferhis.get_by_src(str(full_path))
                         if transferhis and not transferhis.download_hash:
-                            logger.info(f"开始补充转移记录 {transferhis.id} download_hash {hash_str}")
+                            logger.info(f"开始补充转移记录：{transferhis.id} download_hash {hash_str}")
                             self.transferhis.update_download_hash(historyid=transferhis.id,
                                                                   download_hash=hash_str)
 
@@ -181,8 +212,8 @@ class SyncDownloadFiles(_PluginBase):
                             "download_hash": hash_str,
                             "downloader": downloader,
                             "fullpath": str(full_path),
-                            "savepath": str(Path(download_dir).joinpath(torrent_name)),
-                            "filepath": file_name,
+                            "savepath": str(save_path),
+                            "filepath": rel_path,
                             "torrentname": torrent_name,
                         }
                     )
@@ -206,6 +237,7 @@ class SyncDownloadFiles(_PluginBase):
             "enabled": self._enabled,
             "time": self._time,
             "history": self._history,
+            "clear": self._clear,
             "onlyonce": self._onlyonce,
             "downloaders": self._downloaders,
             "dirs": self._dirs
@@ -268,12 +300,26 @@ class SyncDownloadFiles(_PluginBase):
         return True
 
     @staticmethod
-    def __get_file_name(file: Any, dl_type: str):
+    def __is_download(file: Any, dl_type: str):
         """
-        获取文件名
+        判断文件是否被下载
         """
         try:
-            return os.path.basename(file.get("name")) if dl_type == "qbittorrent" else os.path.basename(file.name)
+            if dl_type == "qbittorrent":
+                return True
+            else:
+                return file.completed and file.completed > 0
+        except Exception as e:
+            print(str(e))
+            return True
+
+    @staticmethod
+    def __get_file_path(file: Any, dl_type: str):
+        """
+        获取文件路径
+        """
+        try:
+            return file.get("name") if dl_type == "qbittorrent" else file.name
         except Exception as e:
             print(str(e))
             return ""
@@ -402,6 +448,22 @@ class SyncDownloadFiles(_PluginBase):
                                     }
                                 ]
                             },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                    'md': 4
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'clear',
+                                            'label': '清理数据',
+                                        }
+                                    }
+                                ]
+                            },
                         ]
                     },
                     {
@@ -494,6 +556,7 @@ class SyncDownloadFiles(_PluginBase):
             "enabled": False,
             "onlyonce": False,
             "history": False,
+            "clear": False,
             "time": 6,
             "dirs": "",
             "downloaders": []

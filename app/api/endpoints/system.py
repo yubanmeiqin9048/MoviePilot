@@ -9,13 +9,16 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app import schemas
+from app.chain.search import SearchChain
 from app.core.config import settings
 from app.core.security import verify_token
 from app.db import get_db
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
+from app.schemas.types import SystemConfigKey
 from app.utils.http import RequestUtils
+from app.utils.system import SystemUtils
 from version import APP_VERSION
 
 router = APIRouter()
@@ -60,24 +63,22 @@ def get_progress(process_type: str, token: str):
 
 @router.get("/setting/{key}", summary="查询系统设置", response_model=schemas.Response)
 def get_setting(key: str,
-                db: Session = Depends(get_db),
                 _: schemas.TokenPayload = Depends(verify_token)):
     """
     查询系统设置
     """
     return schemas.Response(success=True, data={
-        "value": SystemConfigOper(db).get(key)
+        "value": SystemConfigOper().get(key)
     })
 
 
 @router.post("/setting/{key}", summary="更新系统设置", response_model=schemas.Response)
 def set_setting(key: str, value: Union[list, dict, str, int] = None,
-                db: Session = Depends(get_db),
                 _: schemas.TokenPayload = Depends(verify_token)):
     """
     更新系统设置
     """
-    SystemConfigOper(db).set(key, value)
+    SystemConfigOper().set(key, value)
     return schemas.Response(success=True)
 
 
@@ -166,3 +167,45 @@ def latest_version(_: schemas.TokenPayload = Depends(verify_token)):
         if ver_json:
             return schemas.Response(success=True, data=ver_json)
     return schemas.Response(success=False)
+
+
+@router.get("/ruletest", summary="过滤规则测试", response_model=schemas.Response)
+def ruletest(title: str,
+             subtitle: str = None,
+             ruletype: str = None,
+             db: Session = Depends(get_db),
+             _: schemas.TokenPayload = Depends(verify_token)):
+    """
+    过滤规则测试，规则类型 1-订阅，2-洗版
+    """
+    torrent = schemas.TorrentInfo(
+        title=title,
+        description=subtitle,
+    )
+    if ruletype == "2":
+        rule_string = SystemConfigOper().get(SystemConfigKey.FilterRules2)
+    else:
+        rule_string = SystemConfigOper().get(SystemConfigKey.FilterRules)
+    if not rule_string:
+        return schemas.Response(success=False, message="过滤规则未设置！")
+
+    # 过滤
+    result = SearchChain(db).filter_torrents(rule_string=rule_string,
+                                             torrent_list=[torrent])
+    if not result:
+        return schemas.Response(success=False, message="不符合过滤规则！")
+    return schemas.Response(success=True, data={
+        "priority": 100 - result[0].pri_order + 1
+    })
+
+
+@router.get("/restart", summary="重启系统", response_model=schemas.Response)
+def restart_system(_: schemas.TokenPayload = Depends(verify_token)):
+    """
+    重启系统
+    """
+    if not SystemUtils.can_restart():
+        return schemas.Response(success=False, message="当前运行环境不支持重启操作！")
+    # 执行重启
+    ret, msg = SystemUtils.restart()
+    return schemas.Response(success=ret, message=msg)

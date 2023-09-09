@@ -16,7 +16,6 @@ from app.core.context import MediaInfo, TorrentInfo
 from app.core.event import EventManager
 from app.core.meta import MetaBase
 from app.core.module import ModuleManager
-from app.helper.format import FormatParser
 from app.log import logger
 from app.schemas import TransferInfo, TransferTorrent, ExistMediaInfo, DownloadingTorrent, CommingMessage, Notification, \
     WebhookEventInfo
@@ -198,7 +197,7 @@ class ChainBase(metaclass=ABCMeta):
         return self.run_module("search_medias", meta=meta)
 
     def search_torrents(self, site: CommentedMap,
-                        mediainfo: Optional[MediaInfo] = None,
+                        mediainfo: MediaInfo,
                         keyword: str = None,
                         page: int = 0,
                         area: str = "title") -> List[TorrentInfo]:
@@ -236,7 +235,7 @@ class ChainBase(metaclass=ABCMeta):
                                torrent_list=torrent_list, season_episodes=season_episodes)
 
     def download(self, torrent_path: Path, download_dir: Path, cookie: str,
-                 episodes: Set[int] = None,
+                 episodes: Set[int] = None, category: str = None
                  ) -> Optional[Tuple[Optional[str], str]]:
         """
         根据种子文件，选择并添加下载任务
@@ -244,10 +243,11 @@ class ChainBase(metaclass=ABCMeta):
         :param download_dir:  下载目录
         :param cookie:  cookie
         :param episodes:  需要下载的集数
+        :param category:  种子分类
         :return: 种子Hash，错误信息
         """
         return self.run_module("download", torrent_path=torrent_path, download_dir=download_dir,
-                               cookie=cookie, episodes=episodes, )
+                               cookie=cookie, episodes=episodes, category=category)
 
     def download_added(self, context: Context, torrent_path: Path, download_dir: Path) -> None:
         """
@@ -273,9 +273,7 @@ class ChainBase(metaclass=ABCMeta):
         return self.run_module("list_torrents", status=status, hashs=hashs)
 
     def transfer(self, path: Path, meta: MetaBase, mediainfo: MediaInfo,
-                 transfer_type: str,
-                 target: Path = None,
-                 formater: FormatParser = None) -> Optional[TransferInfo]:
+                 transfer_type: str, target: Path = None) -> Optional[TransferInfo]:
         """
         文件转移
         :param path:  文件路径
@@ -283,12 +281,10 @@ class ChainBase(metaclass=ABCMeta):
         :param mediainfo:  识别的媒体信息
         :param transfer_type:  转移模式
         :param target:  转移目标路径
-        :param formater:  自定义剧集识别格式
         :return: {path, target_path, message}
         """
         return self.run_module("transfer", path=path, meta=meta, mediainfo=mediainfo,
-                               transfer_type=transfer_type, target=target,
-                               formater=formater)
+                               transfer_type=transfer_type, target=target)
 
     def transfer_completed(self, hashs: Union[str, list], path: Path = None) -> None:
         """
@@ -400,7 +396,7 @@ class ChainBase(metaclass=ABCMeta):
             return self.run_module("scrape_metadata", path=path, mediainfo=mediainfo)
         return None
 
-    def register_commands(self, commands: dict) -> None:
+    def register_commands(self, commands: Dict[str, dict]) -> None:
         """
         注册菜单命令
         """

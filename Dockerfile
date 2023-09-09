@@ -8,6 +8,8 @@ ENV LANG="C.UTF-8" \
     PGID=0 \
     UMASK=000 \
     MOVIEPILOT_AUTO_UPDATE=true \
+    MOVIEPILOT_AUTO_UPDATE_DEV=false \
+    PORT=3001 \
     NGINX_PORT=3000 \
     CONFIG_DIR="/config" \
     API_TOKEN="moviepilot" \
@@ -47,6 +49,7 @@ RUN apt-get update \
         busybox \
         dumb-init \
         jq \
+        haproxy \
     && \
     if [ "$(uname -m)" = "x86_64" ]; \
         then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
@@ -57,7 +60,7 @@ RUN apt-get update \
     && cp -f /app/update /usr/local/bin/mp_update \
     && cp -f /app/entrypoint /entrypoint \
     && chmod +x /entrypoint /usr/local/bin/mp_update \
-    && mkdir -p ${HOME} \
+    && mkdir -p ${HOME} /var/lib/haproxy/server-state \
     && groupadd -r moviepilot -g 911 \
     && useradd -r moviepilot -g moviepilot -d ${HOME} -s /bin/bash -u 911 \
     && apt-get install -y build-essential \
@@ -81,5 +84,5 @@ RUN apt-get update \
         /var/lib/apt/lists/* \
         /var/tmp/*
 EXPOSE 3000
-VOLUME ["/config"]
+VOLUME [ "/config" ]
 ENTRYPOINT [ "/entrypoint" ]

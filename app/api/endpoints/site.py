@@ -6,8 +6,8 @@ from starlette.background import BackgroundTasks
 
 from app import schemas
 from app.chain.cookiecloud import CookieCloudChain
-from app.chain.search import SearchChain
 from app.chain.site import SiteChain
+from app.chain.torrents import TorrentsChain
 from app.core.event import EventManager
 from app.core.security import verify_token
 from app.db import get_db
@@ -117,9 +117,9 @@ def cookie_cloud_sync(db: Session = Depends(get_db),
     清空所有站点数据并重新同步CookieCloud站点信息
     """
     Site.reset(db)
-    SystemConfigOper(db).set(SystemConfigKey.IndexerSites, [])
-    SystemConfigOper(db).set(SystemConfigKey.RssSites, [])
-    CookieCloudChain(db).process(manual=True)
+    SystemConfigOper().set(SystemConfigKey.IndexerSites, [])
+    SystemConfigOper().set(SystemConfigKey.RssSites, [])
+    CookieCloudChain().process(manual=True)
     # 插件站点删除
     EventManager().send_event(EventType.SiteDeleted,
                               {
@@ -191,7 +191,7 @@ def site_icon(site_id: int,
 
 
 @router.get("/resource/{site_id}", summary="站点资源", response_model=List[schemas.TorrentInfo])
-def site_resource(site_id: int, keyword: str = None,
+def site_resource(site_id: int,
                   db: Session = Depends(get_db),
                   _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
@@ -203,7 +203,7 @@ def site_resource(site_id: int, keyword: str = None,
             status_code=404,
             detail=f"站点 {site_id} 不存在",
         )
-    torrents = SearchChain(db).browse(site.domain, keyword)
+    torrents = TorrentsChain().browse(domain=site.domain)
     if not torrents:
         return []
     return [torrent.to_dict() for torrent in torrents]
@@ -234,7 +234,7 @@ def read_rss_sites(db: Session = Depends(get_db)) -> List[dict]:
     获取站点列表
     """
     # 选中的rss站点
-    rss_sites = SystemConfigOper(db).get(SystemConfigKey.RssSites)
+    rss_sites = SystemConfigOper().get(SystemConfigKey.RssSites)
     # 所有站点
     all_site = Site.list_order_by_pri(db)
     if not rss_sites or not all_site:

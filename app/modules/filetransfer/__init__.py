@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 from threading import Lock
-from typing import Optional, List, Tuple, Union
+from typing import Optional, List, Tuple, Union, Dict
 
 from jinja2 import Template
 
@@ -9,10 +9,9 @@ from app.core.config import settings
 from app.core.context import MediaInfo
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
-from app.helper.format import FormatParser
 from app.log import logger
 from app.modules import _ModuleBase
-from app.schemas import TransferInfo
+from app.schemas import TransferInfo, ExistMediaInfo
 from app.schemas.types import MediaType
 from app.utils.system import SystemUtils
 
@@ -31,8 +30,7 @@ class FileTransferModule(_ModuleBase):
         pass
 
     def transfer(self, path: Path, meta: MetaBase, mediainfo: MediaInfo,
-                 transfer_type: str, target: Path = None,
-                 formater: FormatParser = None) -> TransferInfo:
+                 transfer_type: str, target: Path = None) -> TransferInfo:
         """
         文件转移
         :param path:  文件路径
@@ -40,7 +38,6 @@ class FileTransferModule(_ModuleBase):
         :param mediainfo:  识别的媒体信息
         :param transfer_type:  转移方式
         :param target:  目标路径
-        :param formater: 集识别格式
         :return: {path, target_path, message}
         """
         # 获取目标路径
@@ -54,8 +51,7 @@ class FileTransferModule(_ModuleBase):
                                    in_meta=meta,
                                    mediainfo=mediainfo,
                                    transfer_type=transfer_type,
-                                   target_dir=target,
-                                   formater=formater)
+                                   target_dir=target)
 
     @staticmethod
     def __transfer_command(file_item: Path, target_file: Path, transfer_type: str) -> int:
@@ -268,6 +264,9 @@ class FileTransferModule(_ModuleBase):
         """
         retcode = 0
         for file in src_dir.glob("**/*"):
+            # 过滤掉目录
+            if file.is_dir():
+                continue
             # 使用target_dir的父目录作为新的父目录
             new_file = target_dir.joinpath(file.relative_to(src_dir))
             if new_file.exists():
@@ -284,7 +283,7 @@ class FileTransferModule(_ModuleBase):
         return retcode
 
     def __transfer_file(self, file_item: Path, new_file: Path, transfer_type: str,
-                        over_flag: bool = False, old_file: Path = None) -> int:
+                        over_flag: bool = False) -> int:
         """
         转移一个文件，同时处理其他相关文件
         :param file_item: 原文件路径
@@ -292,12 +291,13 @@ class FileTransferModule(_ModuleBase):
         :param transfer_type: RmtMode转移方式
         :param over_flag: 是否覆盖，为True时会先删除再转移
         """
-        if not over_flag and new_file.exists():
-            logger.warn(f"文件已存在：{new_file}")
-            return 0
-        if over_flag and old_file and old_file.exists():
-            logger.info(f"正在删除已存在的文件：{old_file}")
-            old_file.unlink()
+        if new_file.exists():
+            if not over_flag:
+                logger.warn(f"文件已存在：{new_file}")
+                return 0
+            else:
+                logger.info(f"正在删除已存在的文件：{new_file}")
+                new_file.unlink()
         logger.info(f"正在转移文件：{file_item} 到 {new_file}")
         # 创建父目录
         new_file.parent.mkdir(parents=True, exist_ok=True)
@@ -315,31 +315,11 @@ class FileTransferModule(_ModuleBase):
                                            transfer_type=transfer_type,
                                            over_flag=over_flag)
 
-    def transfer_media(self,
-                       in_path: Path,
-                       in_meta: MetaBase,
-                       mediainfo: MediaInfo,
-                       transfer_type: str,
-                       target_dir: Path,
-                       formater: FormatParser = None,
-                       ) -> TransferInfo:
+    @staticmethod
+    def __get_library_dir(mediainfo: MediaInfo, target_dir: Path) -> Path:
         """
-        识别并转移一个文件或者一个目录下的所有文件
-        :param in_path: 转移的路径，可能是一个文件也可以是一个目录
-        :param in_meta：预识别元数据
-        :param mediainfo: 媒体信息
-        :param target_dir: 目的文件夹，非空的转移到该文件夹，为空时则按类型转移到配置文件中的媒体库文件夹
-        :param transfer_type: 文件转移方式
-        :param formater: 识别的剧集格式
-        :return: TransferInfo、错误信息
+        根据设置并装媒体库目录
         """
-        # 检查目录路径
-        if not in_path.exists():
-            return TransferInfo(message=f"{in_path} 路径不存在")
-
-        if not target_dir.exists():
-            return TransferInfo(message=f"{target_dir} 目标路径不存在")
-
         if mediainfo.type == MediaType.MOVIE:
             # 电影
             if settings.LIBRARY_MOVIE_NAME:
@@ -361,6 +341,33 @@ class FileTransferModule(_ModuleBase):
             else:
                 # 目的目录加上类型和二级分类
                 target_dir = target_dir / mediainfo.type.value / mediainfo.category
+        return target_dir
+
+    def transfer_media(self,
+                       in_path: Path,
+                       in_meta: MetaBase,
+                       mediainfo: MediaInfo,
+                       transfer_type: str,
+                       target_dir: Path,
+                       ) -> TransferInfo:
+        """
+        识别并转移一个文件或者一个目录下的所有文件
+        :param in_path: 转移的路径，可能是一个文件也可以是一个目录
+        :param in_meta：预识别元数据
+        :param mediainfo: 媒体信息
+        :param target_dir: 目的文件夹，非空的转移到该文件夹，为空时则按类型转移到配置文件中的媒体库文件夹
+        :param transfer_type: 文件转移方式
+        :return: TransferInfo、错误信息
+        """
+        # 检查目录路径
+        if not in_path.exists():
+            return TransferInfo(message=f"{in_path} 路径不存在")
+
+        if not target_dir.exists():
+            return TransferInfo(message=f"{target_dir} 目标路径不存在")
+
+        # 媒体库目录
+        target_dir = self.__get_library_dir(mediainfo=mediainfo, target_dir=target_dir)
 
         # 重命名格式
         rename_format = settings.TV_RENAME_FORMAT \
@@ -371,6 +378,8 @@ class FileTransferModule(_ModuleBase):
             # 转移整个目录
             # 是否蓝光原盘
             bluray_flag = SystemUtils.is_bluray_dir(in_path)
+            if bluray_flag:
+                logger.info(f"{in_path} 是蓝光原盘文件夹")
             # 目的路径
             new_path = self.get_rename_path(
                 path=target_dir,
@@ -396,23 +405,15 @@ class FileTransferModule(_ModuleBase):
             # 转移单个文件
             # 文件结束季为空
             in_meta.end_season = None
+
             # 文件总季数为1
             if in_meta.total_season:
                 in_meta.total_season = 1
+
             # 文件不可能有多集
             if in_meta.total_episode > 2:
                 in_meta.total_episode = 1
                 in_meta.end_episode = None
-
-            # 自定义识别集数、PART
-            if formater:
-                # 开始集、结束集、PART
-                begin_ep, end_ep, part = formater.split_episode(in_path.stem)
-                if begin_ep is not None:
-                    in_meta.begin_episode = begin_ep
-                    in_meta.part = part
-                if end_ep is not None:
-                    in_meta.end_episode = end_ep
 
             # 目的文件名
             new_file = self.get_rename_path(
@@ -444,7 +445,7 @@ class FileTransferModule(_ModuleBase):
 
             logger.info(f"文件 {in_path} 转移成功")
             return TransferInfo(path=in_path,
-                                target_path=new_file.parent,
+                                target_path=new_file,
                                 file_count=1,
                                 total_size=new_file.stat().st_size,
                                 is_bluray=False,
@@ -519,13 +520,13 @@ class FileTransferModule(_ModuleBase):
         计算一个最好的目的目录，有in_path时找与in_path同路径的，没有in_path时，顺序查找1个符合大小要求的，没有in_path和size时，返回第1个
         :param in_path: 源目录
         """
-        if not settings.LIBRARY_PATH:
+        if not settings.LIBRARY_PATHS:
             return None
         # 目的路径，多路径以,分隔
-        dest_paths = str(settings.LIBRARY_PATH).split(",")
+        dest_paths = settings.LIBRARY_PATHS
         # 只有一个路径，直接返回
         if len(dest_paths) == 1:
-            return Path(dest_paths[0])
+            return dest_paths[0]
         # 匹配有最长共同上级路径的目录
         max_length = 0
         target_path = None
@@ -540,12 +541,78 @@ class FileTransferModule(_ModuleBase):
                     logger.debug(f"计算目标路径时出错：{e}")
                     continue
             if target_path:
-                return Path(target_path)
+                return target_path
         # 顺序匹配第1个满足空间存储要求的目录
         if in_path.exists():
             file_size = in_path.stat().st_size
             for path in dest_paths:
-                if SystemUtils.free_space(Path(path)) > file_size:
-                    return Path(path)
+                if SystemUtils.free_space(path) > file_size:
+                    return path
         # 默认返回第1个
-        return Path(dest_paths[0])
+        return dest_paths[0]
+
+    def media_exists(self, mediainfo: MediaInfo, itemid: str = None) -> Optional[ExistMediaInfo]:
+        """
+        判断媒体文件是否存在于本地文件系统
+        :param mediainfo:  识别的媒体信息
+        :param itemid:  媒体服务器ItemID
+        :return: 如不存在返回None，存在时返回信息，包括每季已存在所有集{type: movie/tv, seasons: {season: [episodes]}}
+        """
+        if not settings.LIBRARY_PATHS:
+            return None
+        # 目的路径
+        dest_paths = settings.LIBRARY_PATHS
+        # 检查每一个媒体库目录
+        for dest_path in dest_paths:
+            # 媒体库路径
+            target_dir = self.get_target_path(dest_path)
+            if not target_dir:
+                continue
+            # 媒体分类路径
+            target_dir = self.__get_library_dir(mediainfo=mediainfo, target_dir=target_dir)
+            # 重命名格式
+            rename_format = settings.TV_RENAME_FORMAT \
+                if mediainfo.type == MediaType.TV else settings.MOVIE_RENAME_FORMAT
+            # 媒体完整路径
+            media_path = self.get_rename_path(
+                path=target_dir,
+                template_string=rename_format,
+                rename_dict=self.__get_naming_dict(meta=MetaInfo(mediainfo.title),
+                                                   mediainfo=mediainfo)
+            )
+
+            if mediainfo.type == MediaType.MOVIE:
+                # 电影取父目录
+                media_path = media_path.parent
+            else:
+                # 电视剧取上两级目录
+                media_path = media_path.parent.parent
+            if not media_path.exists():
+                continue
+
+            # 检索媒体文件
+            media_files = SystemUtils.list_files(directory=media_path, extensions=settings.RMT_MEDIAEXT)
+            if not media_files:
+                continue
+
+            if mediainfo.type == MediaType.MOVIE:
+                # 电影存在任何文件为存在
+                logger.info(f"文件系统已存在：{mediainfo.title_year}")
+                return ExistMediaInfo(type=MediaType.MOVIE)
+            else:
+                # 电视剧检索集数
+                seasons: Dict[int, list] = {}
+                for media_file in media_files:
+                    file_meta = MetaInfo(media_file.stem)
+                    season_index = file_meta.begin_season or 1
+                    episode_index = file_meta.begin_episode
+                    if not episode_index:
+                        continue
+                    if season_index not in seasons:
+                        seasons[season_index] = []
+                    seasons[season_index].append(episode_index)
+                # 返回剧集情况
+                logger.info(f"{mediainfo.title_year} 文件系统已存在：{seasons}")
+                return ExistMediaInfo(type=MediaType.TV, seasons=seasons)
+        # 不存在
+        return None

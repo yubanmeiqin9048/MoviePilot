@@ -30,6 +30,14 @@ class Plex(metaclass=Singleton):
                 self._plex = None
                 logger.error(f"Plex服务器连接失败：{str(e)}")
 
+    def is_inactive(self) -> bool:
+        """
+        判断是否需要重连
+        """
+        if not self._host or not self._token:
+            return False
+        return True if not self._plex else False
+
     def get_librarys(self):
         """
         获取媒体服务器所有媒体库列表
@@ -331,6 +339,7 @@ class Plex(metaclass=Singleton):
         overview   剧情描述
         """
         message = json.loads(message_str)
+        logger.info(f"接收到plex webhook：{message}")
         eventItem = WebhookEventInfo(event=message.get('Event', ''), channel="plex")
         if message.get('Metadata'):
             if message.get('Metadata', {}).get('type') == 'episode':

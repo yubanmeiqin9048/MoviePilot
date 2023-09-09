@@ -1,8 +1,13 @@
+import json
 import time
+from pathlib import Path
 from typing import Any, List
 
+from app.core.context import MediaInfo
+from app.core.meta import MetaBase
 from app.db import DbOper
 from app.db.models.transferhistory import TransferHistory
+from app.schemas import TransferInfo
 
 
 class TransferHistoryOper(DbOper):
@@ -46,12 +51,13 @@ class TransferHistoryOper(DbOper):
         """
         return TransferHistory.statistic(self._db, days)
 
-    def get_by(self, title: str = None, year: str = None,
-               season: str = None, episode: str = None, tmdbid: str = None) -> List[TransferHistory]:
+    def get_by(self, title: str = None, year: str = None, mtype: str = None,
+               season: str = None, episode: str = None, tmdbid: int = None) -> List[TransferHistory]:
         """
         按类型、标题、年份、季集查询转移记录
         """
         return TransferHistory.list_by(db=self._db,
+                                       mtype=mtype,
                                        title=title,
                                        year=year,
                                        season=season,
@@ -88,3 +94,69 @@ class TransferHistoryOper(DbOper):
         补充转移记录download_hash
         """
         TransferHistory.update_download_hash(self._db, historyid, download_hash)
+
+    def add_success(self, src_path: Path, mode: str, meta: MetaBase,
+                    mediainfo: MediaInfo, transferinfo: TransferInfo,
+                    download_hash: str = None):
+        """
+        新增转移成功历史记录
+        """
+        self.add_force(
+            src=str(src_path),
+            dest=str(transferinfo.target_path),
+            mode=mode,
+            type=mediainfo.type.value,
+            category=mediainfo.category,
+            title=mediainfo.title,
+            year=mediainfo.year,
+            tmdbid=mediainfo.tmdb_id,
+            imdbid=mediainfo.imdb_id,
+            tvdbid=mediainfo.tvdb_id,
+            doubanid=mediainfo.douban_id,
+            seasons=meta.season,
+            episodes=meta.episode,
+            image=mediainfo.get_poster_image(),
+            download_hash=download_hash,
+            status=1,
+            files=json.dumps(transferinfo.file_list)
+        )
+
+    def add_fail(self, src_path: Path, mode: str, meta: MetaBase, mediainfo: MediaInfo = None,
+                 transferinfo: TransferInfo = None, download_hash: str = None):
+        """
+        新增转移失败历史记录
+        """
+        if mediainfo and transferinfo:
+            his = self.add_force(
+                src=str(src_path),
+                dest=str(transferinfo.target_path),
+                mode=mode,
+                type=mediainfo.type.value,
+                category=mediainfo.category,
+                title=mediainfo.title or meta.name,
+                year=mediainfo.year or meta.year,
+                tmdbid=mediainfo.tmdb_id,
+                imdbid=mediainfo.imdb_id,
+                tvdbid=mediainfo.tvdb_id,
+                doubanid=mediainfo.douban_id,
+                seasons=meta.season,
+                episodes=meta.episode,
+                image=mediainfo.get_poster_image(),
+                download_hash=download_hash,
+                status=0,
+                errmsg=transferinfo.message or '未知错误',
+                files=json.dumps(transferinfo.file_list)
+            )
+        else:
+            his = self.add_force(
+                title=meta.name,
+                year=meta.year,
+                src=str(src_path),
+                mode=mode,
+                seasons=meta.season,
+                episodes=meta.episode,
+                download_hash=download_hash,
+                status=0,
+                errmsg="未识别到媒体信息"
+            )
+        return his

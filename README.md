@@ -51,7 +51,8 @@ docker pull jxxghp/moviepilot:latest
 - **PGID**：运行程序用户的`gid`，默认`0`
 - **UMASK**：掩码权限，默认`000`，可以考虑设置为`022`
 - **MOVIEPILOT_AUTO_UPDATE**：重启更新，`true`/`false`，默认`true` **注意：如果出现网络问题可以配置`PROXY_HOST`，具体看下方`PROXY_HOST`解释**
-- **NGINX_PORT：** WEB服务端口，默认`3000`，可自行修改，但不能为`3001`
+- **NGINX_PORT：** WEB服务端口，默认`3000`，可自行修改，不能与API服务端口冲突
+- **PORT：** API服务端口，默认`3001`，可自行修改，不能与WEB服务端口冲突
 - **SUPERUSER：** 超级管理员用户名，默认`admin`，安装后使用该用户登录后台管理界面
 - **SUPERUSER_PASSWORD：** 超级管理员初始密码，默认`password`，建议修改为复杂密码
 - **API_TOKEN：** API密钥，默认`moviepilot`，在媒体服务器Webhook、微信回调等地址配置中需要加上`?token=`该值，建议修改为复杂字符串
@@ -65,6 +66,7 @@ docker pull jxxghp/moviepilot:latest
 - **DOWNLOAD_SUBTITLE：** 下载站点字幕，`true`/`false`，默认`true`
 - **REFRESH_MEDIASERVER：** 入库刷新媒体库，`true`/`false`，默认`true`
 - **SCRAP_METADATA：** 刮削入库的媒体文件，`true`/`false`，默认`true`
+- **SCRAP_FOLLOW_TMDB：** 新增已入库媒体是否跟随TMDB信息变化，`true`/`false`，默认`true`
 - **TORRENT_TAG：** 种子标签，默认为`MOVIEPILOT`，设置后只有MoviePilot添加的下载才会处理，留空所有下载器中的任务均会处理
 - **LIBRARY_PATH：** 媒体库目录，多个目录使用`,`分隔
 - **LIBRARY_MOVIE_NAME：** 电影媒体库目录名，默认`电影`
@@ -113,6 +115,7 @@ docker pull jxxghp/moviepilot:latest
     - **QB_HOST：** qbittorrent地址，格式：`ip:port`，https需要添加`https://`前缀
     - **QB_USER：** qbittorrent用户名
     - **QB_PASSWORD：** qbittorrent密码
+    - **QB_CATEGORY：** qbittorrent分类自动管理，`true`/`false`，默认`false`，开启后会将下载二级分类传递到下载器，由下载器管理下载目录，需要同步开启`DOWNLOAD_CATEGORY`
 
   - `transmission`设置项：
 
@@ -219,12 +222,13 @@ docker pull jxxghp/moviepilot:latest
 
 ## 使用
 
-- 通过CookieCloud同步快速同步站点，不需要使用的站点可在WEB管理界面中禁用。
-- 通过下载器监控实现自动整理入库刮削。
-- 通过微信/Telegram/Slack远程管理，其中Telegram将会自动添加操作菜单。微信回调相对路径为`/api/v1/message/`。
-- 通过WEB进行管理，将WEB添加到手机桌面获得类App使用效果，管理界面端口：`3000`。
-- 设置媒体服务器Webhook，通过MoviePilot发送播放通知等。Webhook回调相对路径为`/api/v1/webhook?token=moviepilot`，其中`moviepilot`为设置的`API_TOKEN`。
-- 将MoviePilot做为Radarr或Sonarr服务器添加到Overseerr或Jellyseerr，可使用Overseerr/Jellyseerr浏览订阅。
+- 通过CookieCloud同步快速同步站点，不需要使用的站点可在WEB管理界面中禁用，无法同步的站点可手动新增。
+- 通过WEB进行管理，将WEB添加到手机桌面获得类App使用效果，管理界面端口：`3000`，后台API端口：`3001`。
+- 通过下载器监控或使用目录监控插件实现自动整理入库刮削（二选一）。
+- 通过微信/Telegram/Slack远程管理，其中微信/Telegram将会自动添加操作菜单（微信菜单条数有限制，部分菜单不显示），微信需要在官方页面设置回调地址，地址相对路径为：`/api/v1/message/`。
+- 设置媒体服务器Webhook，通过MoviePilot发送播放通知等。Webhook回调相对路径为`/api/v1/webhook?token=moviepilot`（`3001`端口），其中`moviepilot`为设置的`API_TOKEN`。
+- 将MoviePilot做为Radarr或Sonarr服务器添加到Overseerr或Jellyseerr（`3001`端口），可使用Overseerr/Jellyseerr浏览订阅。
+- 映射宿主机docker.sock文件到容器`/var/run/docker.sock`，以支持内建重启操作。实例：`-v /var/run/docker.sock:/var/run/docker.sock:ro`
 
 **注意**
 
@@ -239,11 +243,24 @@ location / {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
+3) 新建的企业微信应用需要固定公网IP的代理才能收到消息，代理添加以下代码：
+```nginx configuration
+location /cgi-bin/gettoken {
+    proxy_pass https://qyapi.weixin.qq.com;
+}
+location /cgi-bin/message/send {
+    proxy_pass https://qyapi.weixin.qq.com;
+}
+location  /cgi-bin/menu/create {
+    proxy_pass https://qyapi.weixin.qq.com;
+}
+```
 
-![image](https://github.com/jxxghp/MoviePilot/assets/51039935/b8f0238d-847f-4f9d-b210-e905837362b9)
+![image](https://github.com/jxxghp/MoviePilot/assets/51039935/f2654b09-26f3-464f-a0af-1de3f97832ee)
 
-![image](https://github.com/jxxghp/MoviePilot/assets/51039935/28219233-ec7d-479b-b184-9a901c947dd1)
+![image](https://github.com/jxxghp/MoviePilot/assets/51039935/fcb87529-56dd-43df-8337-6e34b8582819)
 
-![image](https://github.com/jxxghp/MoviePilot/assets/51039935/f7df0806-668d-4c8b-ad41-133bf8f0bf73)
+![image](https://github.com/jxxghp/MoviePilot/assets/51039935/bfa77c71-510a-46a6-9c1e-cf98cb101e3a)
 
-![image](https://github.com/jxxghp/MoviePilot/assets/51039935/f7ea77cd-0362-4c35-967c-7f1b22dbef05)
+![image](https://github.com/jxxghp/MoviePilot/assets/51039935/51cafd09-e38c-47f9-ae62-1e83ab8bf89b)
+

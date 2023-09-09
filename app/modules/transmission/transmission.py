@@ -28,7 +28,7 @@ class Transmission(metaclass=Singleton):
         self._host, self._port = StringUtils.get_domain_address(address=settings.TR_HOST, prefix=False)
         self._username = settings.TR_USER
         self._password = settings.TR_PASSWORD
-        if self._host and self._port and self._username and self._password:
+        if self._host and self._port:
             self.trc = self.__login_transmission()
 
     def __login_transmission(self) -> Optional[Client]:
@@ -47,6 +47,14 @@ class Transmission(metaclass=Singleton):
         except Exception as err:
             logger.error(f"transmission 连接出错：{err}")
             return None
+
+    def is_inactive(self) -> bool:
+        """
+        判断是否需要重连
+        """
+        if not self._host or not self._port:
+            return False
+        return True if not self.trc else False
 
     def get_torrents(self, ids: Union[str, list] = None, status: Union[str, list] = None,
                      tags: Union[str, list] = None) -> Tuple[List[Torrent], bool]:
@@ -235,14 +243,14 @@ class Transmission(metaclass=Singleton):
             logger.error(f"获取传输信息出错：{err}")
             return None
 
-    def set_speed_limit(self, download_limit: float = None, upload_limit: float = None):
+    def set_speed_limit(self, download_limit: float = None, upload_limit: float = None) -> bool:
         """
         设置速度限制
         :param download_limit: 下载速度限制，单位KB/s
         :param upload_limit: 上传速度限制，单位kB/s
         """
         if not self.trc:
-            return
+            return False
         try:
             download_limit_enabled = True if download_limit else False
             upload_limit_enabled = True if upload_limit else False
@@ -252,6 +260,7 @@ class Transmission(metaclass=Singleton):
                 speed_limit_down_enabled=download_limit_enabled,
                 speed_limit_up_enabled=upload_limit_enabled
             )
+            return True
         except Exception as err:
             logger.error(f"设置速度限制出错：{err}")
             return False
@@ -278,4 +287,59 @@ class Transmission(metaclass=Singleton):
             return self.trc.change_torrent(ids=ids, tracker_list=[trackers])
         except Exception as err:
             logger.error(f"添加Tracker出错：{err}")
+            return False
+
+    def change_torrent(self,
+                       hash_string: str,
+                       upload_limit=None,
+                       download_limit=None,
+                       ratio_limit=None,
+                       seeding_time_limit=None):
+        """
+        设置种子
+        :param hash_string: ID
+        :param upload_limit: 上传限速 Kb/s
+        :param download_limit: 下载限速 Kb/s
+        :param ratio_limit: 分享率限制
+        :param seeding_time_limit: 做种时间限制
+        :return: bool
+        """
+        if not hash_string:
+            return False
+        if upload_limit:
+            uploadLimited = True
+            uploadLimit = int(upload_limit)
+        else:
+            uploadLimited = False
+            uploadLimit = 0
+        if download_limit:
+            downloadLimited = True
+            downloadLimit = int(download_limit)
+        else:
+            downloadLimited = False
+            downloadLimit = 0
+        if ratio_limit:
+            seedRatioMode = 1
+            seedRatioLimit = round(float(ratio_limit), 2)
+        else:
+            seedRatioMode = 2
+            seedRatioLimit = 0
+        if seeding_time_limit:
+            seedIdleMode = 1
+            seedIdleLimit = int(seeding_time_limit)
+        else:
+            seedIdleMode = 2
+            seedIdleLimit = 0
+        try:
+            self.trc.change_torrent(ids=hash_string,
+                                    uploadLimited=uploadLimited,
+                                    uploadLimit=uploadLimit,
+                                    downloadLimited=downloadLimited,
+                                    downloadLimit=downloadLimit,
+                                    seedRatioMode=seedRatioMode,
+                                    seedRatioLimit=seedRatioLimit,
+                                    seedIdleMode=seedIdleMode,
+                                    seedIdleLimit=seedIdleLimit)
+        except Exception as err:
+            logger.error(f"设置种子出错：{err}")
             return False

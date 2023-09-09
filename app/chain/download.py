@@ -8,6 +8,7 @@ from app.chain import ChainBase
 from app.core.config import settings
 from app.core.context import MediaInfo, TorrentInfo, Context
 from app.core.meta import MetaBase
+from app.core.metainfo import MetaInfo
 from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.db.mediaserver_oper import MediaServerOper
 from app.helper.torrent import TorrentHelper
@@ -151,16 +152,23 @@ class DownloadChain(ChainBase):
         result: Optional[tuple] = self.download(torrent_path=torrent_file,
                                                 cookie=_torrent.site_cookie,
                                                 episodes=episodes,
-                                                download_dir=download_dir)
+                                                download_dir=download_dir,
+                                                category=_media.category)
         if result:
             _hash, error_msg = result
         else:
             _hash, error_msg = None, "未知错误"
 
         if _hash:
+            # 下载文件路径
+            if _folder_name:
+                download_path = download_dir / _folder_name
+            else:
+                download_path = download_dir / _file_list[0] if _file_list else download_dir
+
             # 登记下载记录
             self.downloadhis.add(
-                path=_folder_name or _torrent.title,
+                path=str(download_path),
                 type=_media.type.value,
                 title=_media.title,
                 year=_media.year,
@@ -176,17 +184,27 @@ class DownloadChain(ChainBase):
                 torrent_description=_torrent.description,
                 torrent_site=_torrent.site_name
             )
+
             # 登记下载文件
-            self.downloadhis.add_files([
-                {
+            files_to_add = []
+            for file in _file_list:
+                if episodes:
+                    # 识别文件集
+                    file_meta = MetaInfo(Path(file).stem)
+                    if not file_meta.begin_episode \
+                            or file_meta.begin_episode not in episodes:
+                        continue
+                files_to_add.append({
                     "download_hash": _hash,
                     "downloader": settings.DOWNLOADER,
                     "fullpath": str(download_dir / _folder_name / file),
                     "savepath": str(download_dir / _folder_name),
                     "filepath": file,
                     "torrentname": _meta.org_string,
-                } for file in _file_list if file
-            ])
+                })
+            if files_to_add:
+                self.downloadhis.add_files(files_to_add)
+
             # 发送消息
             self.post_download_message(meta=_meta, mediainfo=_media, torrent=_torrent, channel=channel)
             # 下载成功后处理
@@ -333,27 +351,25 @@ class DownloadChain(ChainBase):
                                 if not torrent_path:
                                     continue
                                 torrent_episodes = self.torrent.get_torrent_episodes(torrent_files)
-                                if torrent_episodes:
-                                    # 总集数
-                                    need_total = __get_season_episodes(need_tmdbid, torrent_season[0])
-                                    if len(torrent_episodes) < need_total:
-                                        # 更新集数范围
-                                        begin_ep = min(torrent_episodes)
-                                        end_ep = max(torrent_episodes)
-                                        meta.set_episodes(begin=begin_ep, end=end_ep)
-                                        logger.info(
-                                            f"{meta.org_string} 解析文件集数为 [{begin_ep}-{end_ep}]，不是完整合集")
-                                        continue
-                                    else:
-                                        # 下载
-                                        download_id = self.download_single(context=context,
-                                                                           torrent_file=torrent_path,
-                                                                           save_path=save_path,
-                                                                           userid=userid)
-                                else:
-                                    logger.info(
-                                        f"{meta.org_string} 解析文件集数为 {len(torrent_episodes)}，不是完整合集")
+                                logger.info(f"{meta.org_string} 解析文件集数为 {torrent_episodes}")
+                                if not torrent_episodes:
                                     continue
+                                # 总集数
+                                need_total = __get_season_episodes(need_tmdbid, torrent_season[0])
+                                if len(torrent_episodes) < need_total:
+                                    # 更新集数范围
+                                    begin_ep = min(torrent_episodes)
+                                    end_ep = max(torrent_episodes)
+                                    meta.set_episodes(begin=begin_ep, end=end_ep)
+                                    logger.info(
+                                        f"{meta.org_string} 解析文件集数发现不是完整合集")
+                                    continue
+                                else:
+                                    # 下载
+                                    download_id = self.download_single(context=context,
+                                                                       torrent_file=torrent_path,
+                                                                       save_path=save_path,
+                                                                       userid=userid)
                             else:
                                 # 下载
                                 download_id = self.download_single(context, save_path=save_path, userid=userid)
@@ -475,11 +491,13 @@ class DownloadChain(ChainBase):
                                 continue
                             # 种子全部集
                             torrent_episodes = self.torrent.get_torrent_episodes(torrent_files)
+                            logger.info(f"{torrent.site_name} - {meta.org_string} 解析文件集数：{torrent_episodes}")
                             # 选中的集
                             selected_episodes = set(torrent_episodes).intersection(set(need_episodes))
                             if not selected_episodes:
                                 logger.info(f"{torrent.site_name} - {torrent.title} 没有需要的集，跳过...")
                                 continue
+                            logger.info(f"{torrent.site_name} - {torrent.title} 选中集数：{selected_episodes}")
                             # 添加下载
                             download_id = self.download_single(context=context,
                                                                torrent_file=torrent_path,
@@ -637,7 +655,8 @@ class DownloadChain(ChainBase):
             self.post_message(Notification(
                 channel=channel,
                 mtype=NotificationType.Download,
-                title="没有正在下载的任务！"))
+                title="没有正在下载的任务！",
+                userid=userid))
             return
         # 发送消息
         title = f"共 {len(torrents)} 个任务正在下载："
@@ -646,7 +665,7 @@ class DownloadChain(ChainBase):
         for torrent in torrents:
             messages.append(f"{index}. {torrent.title} "
                             f"{StringUtils.str_filesize(torrent.size)} "
-                            f"{round(torrent.progress * 100, 1)}%")
+                            f"{round(torrent.progress, 1)}%")
             index += 1
         self.post_message(Notification(
             channel=channel, mtype=NotificationType.Download,

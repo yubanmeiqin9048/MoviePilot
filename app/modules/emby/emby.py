@@ -27,6 +27,14 @@ class Emby(metaclass=Singleton):
         self.user = self.get_user()
         self.folders = self.get_emby_folders()
 
+    def is_inactive(self) -> bool:
+        """
+        判断是否需要重连
+        """
+        if not self._host or not self._apikey:
+            return False
+        return True if not self.user else False
+
     def get_emby_folders(self) -> List[dict]:
         """
         获取Emby媒体库路径列表
@@ -459,31 +467,15 @@ class Emby(metaclass=Singleton):
         # 查找需要刷新的媒体库ID
         item_path = Path(item.target_path)
         for folder in self.folders:
-            # 找同级路径最多的媒体库（要求容器内映射路径与实际一致）
-            max_comm_path = ""
-            match_num = 0
-            match_id = None
             # 匹配子目录
             for subfolder in folder.get("SubFolders"):
                 try:
-                    # 查询最大公共路径
+                    # 匹配子目录
                     subfolder_path = Path(subfolder.get("Path"))
-                    item_path_parents = list(item_path.parents)
-                    subfolder_path_parents = list(subfolder_path.parents)
-                    common_path = next(p1 for p1, p2 in zip(reversed(item_path_parents),
-                                                            reversed(subfolder_path_parents)
-                                                            ) if p1 == p2)
-                    if len(common_path) > len(max_comm_path):
-                        max_comm_path = common_path
-                        match_id = subfolder.get("Id")
-                        match_num += 1
-                except StopIteration:
-                    continue
+                    if item_path.is_relative_to(subfolder_path):
+                        return subfolder.get("Id")
                 except Exception as err:
                     print(str(err))
-            # 检查匹配情况
-            if match_id:
-                return match_id if match_num == 1 else folder.get("Id")
             # 如果找不到，只要路径中有分类目录名就命中
             for subfolder in folder.get("SubFolders"):
                 if subfolder.get("Path") and re.search(r"[/\\]%s" % item.category,
@@ -784,6 +776,7 @@ class Emby(metaclass=Singleton):
         }
         """
         message = json.loads(message_str)
+        logger.info(f"接收到emby webhook：{message}")
         eventItem = WebhookEventInfo(event=message.get('Event', ''), channel="emby")
         if message.get('Item'):
             if message.get('Item', {}).get('Type') == 'Episode':
@@ -812,9 +805,9 @@ class Emby(metaclass=Singleton):
                 eventItem.item_type = "MOV"
                 eventItem.item_name = "%s %s" % (
                     message.get('Item', {}).get('Name'), "(" + str(message.get('Item', {}).get('ProductionYear')) + ")")
-                eventItem.item_path = message.get('Item', {}).get('Path')
                 eventItem.item_id = message.get('Item', {}).get('Id')
 
+            eventItem.item_path = message.get('Item', {}).get('Path')
             eventItem.tmdb_id = message.get('Item', {}).get('ProviderIds', {}).get('Tmdb')
             if message.get('Item', {}).get('Overview') and len(message.get('Item', {}).get('Overview')) > 100:
                 eventItem.overview = str(message.get('Item', {}).get('Overview'))[:100] + "..."
@@ -855,8 +848,8 @@ class Emby(metaclass=Singleton):
         """
         if not self._host or not self._apikey:
             return None
-        url = url.replace("{HOST}", self._host)\
-            .replace("{APIKEY}", self._apikey)\
+        url = url.replace("{HOST}", self._host) \
+            .replace("{APIKEY}", self._apikey) \
             .replace("{USER}", self.user)
         try:
             return RequestUtils().get_res(url=url)

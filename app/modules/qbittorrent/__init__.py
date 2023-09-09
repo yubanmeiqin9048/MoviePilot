@@ -33,17 +33,18 @@ class QbittorrentModule(_ModuleBase):
         定时任务，每10分钟调用一次
         """
         # 定时重连
-        if not self.qbittorrent.qbc:
+        if self.qbittorrent.is_inactive():
             self.qbittorrent = Qbittorrent()
 
     def download(self, torrent_path: Path, download_dir: Path, cookie: str,
-                 episodes: Set[int] = None) -> Optional[Tuple[Optional[str], str]]:
+                 episodes: Set[int] = None, category: str = None) -> Optional[Tuple[Optional[str], str]]:
         """
         根据种子文件，选择并添加下载任务
         :param torrent_path:  种子文件地址
         :param download_dir:  下载目录
         :param cookie:  cookie
         :param episodes:  需要下载的集数
+        :param category:  分类
         :return: 种子Hash，错误信息
         """
         if not torrent_path or not torrent_path.exists():
@@ -61,7 +62,8 @@ class QbittorrentModule(_ModuleBase):
                                              download_dir=str(download_dir),
                                              is_paused=is_paused,
                                              tag=tags,
-                                             cookie=cookie)
+                                             cookie=cookie,
+                                             category=category)
         if not state:
             return None, f"添加种子任务失败：{torrent_path}"
         else:
