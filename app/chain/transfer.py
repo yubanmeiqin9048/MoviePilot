@@ -1,3 +1,4 @@
+import glob
 import re
 import shutil
 import threading
@@ -85,7 +86,7 @@ class TransferChain(ChainBase):
                     mediainfo: MediaInfo = None, download_hash: str = None,
                     target: Path = None, transfer_type: str = None,
                     season: int = None, epformat: EpisodeFormat = None,
-                    min_filesize: int = 0) -> Tuple[bool, str]:
+                    min_filesize: int = 0, force: bool = False) -> Tuple[bool, str]:
         """
         执行一个复杂目录的转移操作
         :param path: 待转移目录或文件
@@ -97,6 +98,7 @@ class TransferChain(ChainBase):
         :param season: 季
         :param epformat: 剧集格式
         :param min_filesize: 最小文件大小(MB)
+        :param force: 是否强制转移
         返回：成功标识，错误信息
         """
         if not transfer_type:
@@ -174,19 +176,25 @@ class TransferChain(ChainBase):
                     continue
 
                 # 整理屏蔽词不处理
+                is_blocked = False
                 if transfer_exclude_words:
                     for keyword in transfer_exclude_words:
                         if not keyword:
                             continue
-                        if keyword and re.findall(keyword, file_path_str):
+                        if keyword and re.search(r"%s" % keyword, file_path_str, re.IGNORECASE):
                             logger.info(f"{file_path} 命中整理屏蔽词 {keyword}，不处理")
-                            continue
+                            is_blocked = True
+                            break
+                if is_blocked:
+                    err_msgs.append(f"{file_path.name} 命中整理屏蔽词")
+                    continue
 
                 # 转移成功的不再处理
-                transferd = self.transferhis.get_by_src(file_path_str)
-                if transferd and transferd.status:
-                    logger.info(f"{file_path} 已成功转移过，如需重新处理，请删除历史记录。")
-                    continue
+                if not force:
+                    transferd = self.transferhis.get_by_src(file_path_str)
+                    if transferd and transferd.status:
+                        logger.info(f"{file_path} 已成功转移过，如需重新处理，请删除历史记录。")
+                        continue
 
                 # 更新进度
                 self.progress.update(value=processed_num / total_num * 100,
@@ -246,10 +254,10 @@ class TransferChain(ChainBase):
 
                 # 如果未开启新增已入库媒体是否跟随TMDB信息变化则根据tmdbid查询之前的title
                 if not settings.SCRAP_FOLLOW_TMDB:
-                    transfer_historys = self.transferhis.get_by(tmdbid=file_mediainfo.tmdb_id,
-                                                                mtype=file_mediainfo.type.value)
-                    if transfer_historys:
-                        file_mediainfo.title = transfer_historys[0].title
+                    transfer_history = self.transferhis.get_by_type_tmdbid(tmdbid=file_mediainfo.tmdb_id,
+                                                                           mtype=file_mediainfo.type.value)
+                    if transfer_history:
+                        file_mediainfo.title = transfer_history.title
 
                 logger.info(f"{file_path.name} 识别为：{file_mediainfo.type.value} {file_mediainfo.title_year}")
 
@@ -292,7 +300,7 @@ class TransferChain(ChainBase):
                 if not transferinfo:
                     logger.error("文件转移模块运行失败")
                     return False, "文件转移模块运行失败"
-                if not transferinfo.target_path:
+                if not transferinfo.success:
                     # 转移失败
                     logger.warn(f"{file_path.name} 入库失败：{transferinfo.message}")
                     err_msgs.append(f"{file_path.name} {transferinfo.message}")
@@ -342,7 +350,8 @@ class TransferChain(ChainBase):
                     transferinfo=transferinfo
                 )
                 # 刮削单个文件
-                self.scrape_metadata(path=transferinfo.target_path, mediainfo=file_mediainfo)
+                if settings.SCRAP_METADATA:
+                    self.scrape_metadata(path=transferinfo.target_path, mediainfo=file_mediainfo)
                 # 更新进度
                 processed_num += 1
                 self.progress.update(value=processed_num / total_num * 100,
@@ -362,7 +371,8 @@ class TransferChain(ChainBase):
                 if transfer_info.target_path.is_file():
                     transfer_info.target_path = transfer_info.target_path.parent
                 # 刷新媒体库，根目录或季目录
-                self.refresh_mediaserver(mediainfo=media, file_path=transfer_info.target_path)
+                if settings.REFRESH_MEDIASERVER:
+                    self.refresh_mediaserver(mediainfo=media, file_path=transfer_info.target_path)
                 # 发送通知
                 se_str = None
                 if media.type == MediaType.TV:
@@ -480,6 +490,7 @@ class TransferChain(ChainBase):
         src_path = Path(history.src)
         if not src_path.exists():
             return False, f"源目录不存在：{src_path}"
+        dest_path = Path(history.dest) if history.dest else None
         # 查询媒体信息
         mediainfo = self.recognize_media(mtype=mtype, tmdbid=tmdbid)
         if not mediainfo:
@@ -493,10 +504,12 @@ class TransferChain(ChainBase):
         if history.dest:
             self.delete_files(Path(history.dest))
 
-        # 转移
+        # 强制转移
         state, errmsg = self.do_transfer(path=src_path,
                                          mediainfo=mediainfo,
-                                         download_hash=history.download_hash)
+                                         download_hash=history.download_hash,
+                                         target=dest_path,
+                                         force=True)
         if not state:
             return False, errmsg
 
@@ -591,8 +604,10 @@ class TransferChain(ChainBase):
         if not path.exists():
             return
         if path.is_file():
-            # 删除文件
-            path.unlink()
+            # 删除文件、nfo、jpg
+            files = glob.glob(f"{Path(path.parent).joinpath(path.stem)}*")
+            for file in files:
+                Path(file).unlink()
             logger.warn(f"文件 {path} 已删除")
             # 需要删除父目录
         elif str(path.parent) == str(path.root):
@@ -605,11 +620,24 @@ class TransferChain(ChainBase):
             # 删除目录
             logger.warn(f"目录 {path} 已删除")
             # 需要删除父目录
-        # 判断父目录是否为空, 为空则删除
-        for parent_path in path.parents:
-            if str(parent_path.parent) != str(path.root):
-                # 父目录非根目录，才删除父目录
-                files = SystemUtils.list_files(parent_path, settings.RMT_MEDIAEXT)
-                if not files:
-                    shutil.rmtree(parent_path)
-                    logger.warn(f"目录 {parent_path} 已删除")
+
+        # 判断当前媒体父路径下是否有媒体文件，如有则无需遍历父级
+        if not SystemUtils.exits_files(path.parent, settings.RMT_MEDIAEXT):
+            # 媒体库二级分类根路径
+            library_root_names = [
+                settings.LIBRARY_MOVIE_NAME or '电影',
+                settings.LIBRARY_TV_NAME or '电视剧',
+                settings.LIBRARY_ANIME_NAME or '动漫',
+            ]
+
+            # 判断父目录是否为空, 为空则删除
+            for parent_path in path.parents:
+                # 遍历父目录到媒体库二级分类根路径
+                if str(parent_path.name) in library_root_names:
+                    break
+                if str(parent_path.parent) != str(path.root):
+                    # 父目录非根目录，才删除父目录
+                    if not SystemUtils.exits_files(parent_path, settings.RMT_MEDIAEXT):
+                        # 当前路径下没有媒体文件则删除
+                        shutil.rmtree(parent_path)
+                        logger.warn(f"目录 {parent_path} 已删除")

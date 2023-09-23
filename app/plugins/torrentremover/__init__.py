@@ -605,7 +605,7 @@ class TorrentRemover(_PluginBase):
                     if torrents and message_text and self._notify:
                         self.post_message(
                             mtype=NotificationType.SiteMessage,
-                            title=f"【自动删种任务执行完成】",
+                            title=f"【自动删种任务完成】",
                             text=message_text
                         )
             except Exception as e:
@@ -644,7 +644,7 @@ class TorrentRemover(_PluginBase):
             return None
         if self._torrentstates and torrent.state not in self._torrentstates:
             return None
-        if self._torrentcategorys and torrent.category not in self._torrentcategorys:
+        if self._torrentcategorys and torrent.category and torrent.category not in self._torrentcategorys:
             return None
         return {
             "id": torrent.hash,
@@ -731,19 +731,34 @@ class TorrentRemover(_PluginBase):
             remove_torrents.append(item)
         # 处理辅种
         if self._samedata and remove_torrents:
+            remove_ids = [t.get("id") for t in remove_torrents]
             remove_torrents_plus = []
             for remove_torrent in remove_torrents:
                 name = remove_torrent.get("name")
                 size = remove_torrent.get("size")
                 for torrent in torrents:
-                    if torrent.name == name \
-                            and torrent.size == size \
-                            and torrent.hash not in [t.get("id") for t in remove_torrents]:
-                        remove_torrents_plus.append({
-                            "id": torrent.hash,
-                            "name": torrent.name,
-                            "site": StringUtils.get_url_sld(torrent.tracker),
-                            "size": torrent.size
-                        })
-            remove_torrents.extend(remove_torrents_plus)
+                    if downloader == "qbittorrent":
+                        plus_id = torrent.hash
+                        plus_name = torrent.name
+                        plus_size = torrent.size
+                        plus_site = StringUtils.get_url_sld(torrent.tracker)
+                    else:
+                        plus_id = torrent.hashString
+                        plus_name = torrent.name
+                        plus_size = torrent.total_size
+                        plus_site = torrent.trackers[0].get("sitename") if torrent.trackers else ""
+                    # 比对名称和大小
+                    if plus_name == name \
+                            and plus_size == size \
+                            and plus_id not in remove_ids:
+                        remove_torrents_plus.append(
+                            {
+                                "id": plus_id,
+                                "name": plus_name,
+                                "site": plus_site,
+                                "size": plus_size
+                            }
+                        )
+            if remove_torrents_plus:
+                remove_torrents.extend(remove_torrents_plus)
         return remove_torrents

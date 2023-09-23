@@ -223,7 +223,7 @@ class DirMonitor(_PluginBase):
                         for keyword in transfer_exclude_words:
                             if not keyword:
                                 continue
-                            if keyword and re.findall(keyword, event_path):
+                            if keyword and re.search(r"%s" % keyword, event_path, re.IGNORECASE):
                                 logger.info(f"{event_path} 命中整理屏蔽词 {keyword}，不处理")
                                 return
 
@@ -270,10 +270,10 @@ class DirMonitor(_PluginBase):
 
                     # 如果未开启新增已入库媒体是否跟随TMDB信息变化则根据tmdbid查询之前的title
                     if not settings.SCRAP_FOLLOW_TMDB:
-                        transfer_historys = self.transferhis.get_by(tmdbid=mediainfo.tmdb_id,
-                                                                    mtype=mediainfo.type.value)
-                        if transfer_historys:
-                            mediainfo.title = transfer_historys[0].title
+                        transfer_history = self.transferhis.get_by_type_tmdbid(tmdbid=mediainfo.tmdb_id,
+                                                                               mtype=mediainfo.type.value)
+                        if transfer_history:
+                            mediainfo.title = transfer_history.title
                     logger.info(f"{file_path.name} 识别为：{mediainfo.type.value} {mediainfo.title_year}")
 
                     # 更新媒体图片
@@ -292,7 +292,7 @@ class DirMonitor(_PluginBase):
                     if not transferinfo:
                         logger.error("文件转移模块运行失败")
                         return
-                    if not transferinfo.target_path:
+                    if not transferinfo.success:
                         # 转移失败
                         logger.warn(f"{file_path.name} 入库失败：{transferinfo.message}")
                         # 新增转移失败历史记录
@@ -323,8 +323,9 @@ class DirMonitor(_PluginBase):
                     )
 
                     # 刮削单个文件
-                    self.chain.scrape_metadata(path=transferinfo.target_path,
-                                               mediainfo=mediainfo)
+                    if settings.SCRAP_METADATA:
+                        self.chain.scrape_metadata(path=transferinfo.target_path,
+                                                   mediainfo=mediainfo)
 
                     """
                     {
@@ -386,7 +387,8 @@ class DirMonitor(_PluginBase):
                     self._medias[mediainfo.title_year + " " + meta.season] = media_list
 
                     # 汇总刷新媒体库
-                    self.chain.refresh_mediaserver(mediainfo=mediainfo, file_path=transferinfo.target_path)
+                    if settings.REFRESH_MEDIASERVER:
+                        self.chain.refresh_mediaserver(mediainfo=mediainfo, file_path=transferinfo.target_path)
                     # 广播事件
                     self.eventmanager.send_event(EventType.TransferComplete, {
                         'meta': file_meta,

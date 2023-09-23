@@ -31,7 +31,7 @@ class PlexModule(_ModuleBase):
         if not self.plex.is_inactive():
             self.plex = Plex()
 
-    def webhook_parser(self, body: Any, form: Any, args: Any) -> WebhookEventInfo:
+    def webhook_parser(self, body: Any, form: Any, args: Any) -> Optional[WebhookEventInfo]:
         """
         解析Webhook报文体
         :param body:  请求体
@@ -39,7 +39,7 @@ class PlexModule(_ModuleBase):
         :param args:  请求参数
         :return: 字典，解析为消息时需要包含：title、text、image
         """
-        return self.plex.get_webhook_message(form.get("payload"))
+        return self.plex.get_webhook_message(form)
 
     def media_exists(self, mediainfo: MediaInfo, itemid: List[str] = []) -> Optional[ExistMediaInfo]:
         """
@@ -54,7 +54,10 @@ class PlexModule(_ModuleBase):
                 if movie:
                     logger.info(f"媒体库中已存在：{movie}")
                     return ExistMediaInfo(type=MediaType.MOVIE)
-            movies = self.plex.get_movies(title=mediainfo.title, year=mediainfo.year)
+            movies = self.plex.get_movies(title=mediainfo.title,
+                                          original_title=mediainfo.original_title, 
+                                          year=mediainfo.year, 
+                                          tmdb_id=mediainfo.tmdb_id)
             if not movies:
                 logger.info(f"{mediainfo.title_year} 在媒体库中不存在")
                 return None
@@ -63,7 +66,9 @@ class PlexModule(_ModuleBase):
                 return ExistMediaInfo(type=MediaType.MOVIE)
         else:
             tvs = self.plex.get_tv_episodes(title=mediainfo.title,
+                                            original_title=mediainfo.original_title,
                                             year=mediainfo.year,
+                                            tmdb_id=mediainfo.tmdb_id,
                                             item_ids=itemid)
             if not tvs:
                 logger.info(f"{mediainfo.title_year} 在媒体库中不存在")
@@ -72,7 +77,7 @@ class PlexModule(_ModuleBase):
                 logger.info(f"{mediainfo.title_year} 媒体库中已存在：{tvs}")
                 return ExistMediaInfo(type=MediaType.TV, seasons=tvs)
 
-    def refresh_mediaserver(self, mediainfo: MediaInfo, file_path: Path) -> Optional[bool]:
+    def refresh_mediaserver(self, mediainfo: MediaInfo, file_path: Path) -> None:
         """
         刷新媒体库
         :param mediainfo:  识别的媒体信息
@@ -88,24 +93,26 @@ class PlexModule(_ModuleBase):
                 target_path=file_path
             )
         ]
-        return self.plex.refresh_library_by_items(items)
+        self.plex.refresh_library_by_items(items)
 
-    def media_statistic(self) -> schemas.Statistic:
+    def media_statistic(self) -> List[schemas.Statistic]:
         """
         媒体数量统计
         """
         media_statistic = self.plex.get_medias_count()
-        return schemas.Statistic(
+        return [schemas.Statistic(
             movie_count=media_statistic.get("MovieCount") or 0,
             tv_count=media_statistic.get("SeriesCount") or 0,
             episode_count=media_statistic.get("EpisodeCount") or 0,
             user_count=1
-        )
+        )]
 
-    def mediaserver_librarys(self) -> List[schemas.MediaServerLibrary]:
+    def mediaserver_librarys(self, server: str) -> Optional[List[schemas.MediaServerLibrary]]:
         """
         媒体库列表
         """
+        if server != "plex":
+            return None
         librarys = self.plex.get_librarys()
         if not librarys:
             return []
@@ -117,10 +124,12 @@ class PlexModule(_ModuleBase):
             path=library.get("path")
         ) for library in librarys]
 
-    def mediaserver_items(self, library_id: str) -> Generator:
+    def mediaserver_items(self, server: str, library_id: str) -> Optional[Generator]:
         """
         媒体库项目列表
         """
+        if server != "plex":
+            return None
         items = self.plex.get_items(library_id)
         for item in items:
             yield schemas.MediaServerItem(
@@ -137,7 +146,8 @@ class PlexModule(_ModuleBase):
                 path=item.get("path"),
             )
 
-    def mediaserver_tv_episodes(self, item_id: Union[str, int]) -> List[schemas.MediaServerSeasonInfo]:
+    def mediaserver_tv_episodes(self, server: str,
+                                item_id: Union[str, int]) -> Optional[List[schemas.MediaServerSeasonInfo]]:
         """
         获取剧集信息
         """

@@ -24,7 +24,7 @@ lock = Lock()
 
 class RssSubscribe(_PluginBase):
     # 插件名称
-    plugin_name = "RSS订阅"
+    plugin_name = "自定义订阅"
     # 插件描述
     plugin_desc = "定时刷新RSS报文，识别内容后添加订阅或直接下载。"
     # 插件图标
@@ -549,7 +549,7 @@ class RssSubscribe(_PluginBase):
                 logger.error(f"未获取到RSS数据：{url}")
                 return
             # 过滤规则
-            filter_rule = self.systemconfig.get(SystemConfigKey.FilterRules)
+            filter_rule = self.systemconfig.get(SystemConfigKey.SubscribeFilterRules)
             # 解析数据
             for result in results:
                 try:
@@ -593,7 +593,8 @@ class RssSubscribe(_PluginBase):
                     if self._filter:
                         result = self.chain.filter_torrents(
                             rule_string=filter_rule,
-                            torrent_list=[torrentinfo]
+                            torrent_list=[torrentinfo],
+                            mediainfo=mediainfo
                         )
                         if not result:
                             logger.info(f"{title} {description} 不匹配过滤规则")

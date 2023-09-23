@@ -2,7 +2,6 @@ import datetime
 import json
 import os
 import re
-import shutil
 import time
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
@@ -10,11 +9,10 @@ from typing import List, Tuple, Dict, Any, Optional
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from app.chain.transfer import TransferChain
 from app.core.config import settings
 from app.core.event import eventmanager, Event
-from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.db.models.transferhistory import TransferHistory
-from app.db.transferhistory_oper import TransferHistoryOper
 from app.log import logger
 from app.modules.emby import Emby
 from app.modules.jellyfin import Jellyfin
@@ -23,7 +21,6 @@ from app.modules.themoviedb.tmdbv3api import Episode
 from app.modules.transmission import Transmission
 from app.plugins import _PluginBase
 from app.schemas.types import NotificationType, EventType, MediaType
-from app.utils.path_utils import PathUtils
 
 
 class MediaSyncDel(_PluginBase):
@@ -57,14 +54,17 @@ class MediaSyncDel(_PluginBase):
     _notify = False
     _del_source = False
     _exclude_path = None
+    _library_path = None
+    _transferchain = None
     _transferhis = None
     _downloadhis = None
     qb = None
     tr = None
 
     def init_plugin(self, config: dict = None):
-        self._transferhis = TransferHistoryOper(self.db)
-        self._downloadhis = DownloadHistoryOper(self.db)
+        self._transferchain = TransferChain(self.db)
+        self._transferhis = self._transferchain.transferhis
+        self._downloadhis = self._transferchain.downloadhis
         self.episode = Episode()
         self.qb = Qbittorrent()
         self.tr = Transmission()
@@ -80,6 +80,7 @@ class MediaSyncDel(_PluginBase):
             self._notify = config.get("notify")
             self._del_source = config.get("del_source")
             self._exclude_path = config.get("exclude_path")
+            self._library_path = config.get("library_path")
 
         if self._enabled and str(self._sync_type) == "log":
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
@@ -241,6 +242,28 @@ class MediaSyncDel(_PluginBase):
                                 },
                                 'content': [
                                     {
+                                        'component': 'VTextarea',
+                                        'props': {
+                                            'model': 'library_path',
+                                            'rows': '2',
+                                            'label': '媒体库路径',
+                                            'placeholder': '媒体服务器路径:MoviePilot路径（一行一个）'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                },
+                                'content': [
+                                    {
                                         'component': 'VAlert',
                                         'props': {
                                             'text': '同步方式分为webhook、日志同步和Scripter X。'
@@ -260,6 +283,7 @@ class MediaSyncDel(_PluginBase):
             "enabled": False,
             "notify": True,
             "del_source": False,
+            "library_path": "",
             "sync_type": "webhook",
             "cron": "*/30 * * * *",
             "exclude_path": "",
@@ -477,6 +501,7 @@ class MediaSyncDel(_PluginBase):
                 "enabled": False,
                 "del_source": self._del_source,
                 "exclude_path": self._exclude_path,
+                "library_path": self._library_path,
                 "notify": self._notify,
                 "cron": self._cron,
                 "sync_type": self._sync_type,
@@ -508,7 +533,7 @@ class MediaSyncDel(_PluginBase):
                         episode_num=episode_num)
 
     def __sync_del(self, media_type: str, media_name: str, media_path: str,
-                   tmdb_id: int, season_num: int, episode_num: int):
+                   tmdb_id: int, season_num: str, episode_num: str):
         """
         执行删除逻辑
         """
@@ -528,6 +553,7 @@ class MediaSyncDel(_PluginBase):
         # 查询转移记录
         msg, transfer_history = self.__get_transfer_his(media_type=media_type,
                                                         media_name=media_name,
+                                                        media_path=media_path,
                                                         tmdb_id=tmdb_id,
                                                         season_num=season_num,
                                                         episode_num=episode_num)
@@ -560,10 +586,7 @@ class MediaSyncDel(_PluginBase):
             if self._del_source:
                 # 1、直接删除源文件
                 if transferhis.src and Path(transferhis.src).suffix in settings.RMT_MEDIAEXT:
-                    source_name = os.path.basename(transferhis.src)
-                    source_path = str(transferhis.src).replace(source_name, "")
-                    self.delete_media_file(filedir=source_path,
-                                           filename=source_name)
+                    self._transferchain.delete_files(Path(transferhis.src))
                     if transferhis.download_hash:
                         try:
                             # 2、判断种子是否被删除完
@@ -626,27 +649,38 @@ class MediaSyncDel(_PluginBase):
         # 保存历史
         self.save_data("history", history)
 
-    def __get_transfer_his(self, media_type: str, media_name: str,
-                           tmdb_id: int, season_num: int, episode_num: int):
+    def __get_transfer_his(self, media_type: str, media_name: str, media_path: str,
+                           tmdb_id: int, season_num: str, episode_num: str):
         """
         查询转移记录
         """
-
         # 季数
-        if season_num:
+        if season_num and season_num.isdigit():
             season_num = str(season_num).rjust(2, '0')
+        else:
+            season_num = None
         # 集数
-        if episode_num:
+        if episode_num and episode_num.isdigit():
             episode_num = str(episode_num).rjust(2, '0')
+        else:
+            episode_num = None
 
         # 类型
         mtype = MediaType.MOVIE if media_type in ["Movie", "MOV"] else MediaType.TV
+
+        # 处理路径映射 (处理同一媒体多分辨率的情况)
+        if self._library_path:
+            paths = self._library_path.split("\n")
+            for path in paths:
+                sub_paths = path.split(":")
+                media_path = media_path.replace(sub_paths[0], sub_paths[1]).replace('\\', '/')
 
         # 删除电影
         if mtype == MediaType.MOVIE:
             msg = f'电影 {media_name} {tmdb_id}'
             transfer_history: List[TransferHistory] = self._transferhis.get_by(tmdbid=tmdb_id,
-                                                                               mtype=mtype.value)
+                                                                               mtype=mtype.value,
+                                                                               dest=media_path)
         # 删除电视剧
         elif mtype == MediaType.TV and not season_num and not episode_num:
             msg = f'剧集 {media_name} {tmdb_id}'
@@ -670,7 +704,8 @@ class MediaSyncDel(_PluginBase):
             transfer_history: List[TransferHistory] = self._transferhis.get_by(tmdbid=tmdb_id,
                                                                                mtype=mtype.value,
                                                                                season=f'S{season_num}',
-                                                                               episode=f'E{episode_num}')
+                                                                               episode=f'E{episode_num}',
+                                                                               dest=media_path)
         else:
             return "", []
 
@@ -723,13 +758,21 @@ class MediaSyncDel(_PluginBase):
                 logger.info(f"媒体路径 {media_path} 已被排除，暂不处理")
                 return
 
+            # 处理路径映射 (处理同一媒体多分辨率的情况)
+            if self._library_path:
+                paths = self._library_path.split("\n")
+                for path in paths:
+                    sub_paths = path.split(":")
+                    media_path = media_path.replace(sub_paths[0], sub_paths[1]).replace('\\', '/')
+
             # 获取删除的记录
             # 删除电影
             if media_type == "Movie":
                 msg = f'电影 {media_name}'
                 transfer_history: List[TransferHistory] = self._transferhis.get_by(
                     title=media_name,
-                    year=media_year)
+                    year=media_year,
+                    dest=media_path)
             # 删除电视剧
             elif media_type == "Series":
                 msg = f'剧集 {media_name}'
@@ -750,7 +793,8 @@ class MediaSyncDel(_PluginBase):
                     title=media_name,
                     year=media_year,
                     season=media_season,
-                    episode=media_episode)
+                    episode=media_episode,
+                    dest=media_path)
             else:
                 continue
 
@@ -781,10 +825,7 @@ class MediaSyncDel(_PluginBase):
                 if self._del_source:
                     # 1、直接删除源文件
                     if transferhis.src and Path(transferhis.src).suffix in settings.RMT_MEDIAEXT:
-                        source_name = os.path.basename(transferhis.src)
-                        source_path = str(transferhis.src).replace(source_name, "")
-                        self.delete_media_file(filedir=source_path,
-                                               filename=source_name)
+                        self._transferchain.delete_files(Path(transferhis.src))
                         if transferhis.download_hash:
                             try:
                                 # 2、判断种子是否被删除完
@@ -1142,42 +1183,6 @@ class MediaSyncDel(_PluginBase):
             del_medias.append(media)
 
         return del_medias
-
-    @staticmethod
-    def delete_media_file(filedir: str, filename: str):
-        """
-        删除媒体文件，空目录也会被删除
-        """
-        filedir = os.path.normpath(filedir).replace("\\", "/")
-        file = os.path.join(filedir, filename)
-        try:
-            if not os.path.exists(file):
-                return False, f"{file} 不存在"
-            os.remove(file)
-            nfoname = f"{os.path.splitext(filename)[0]}.nfo"
-            nfofile = os.path.join(filedir, nfoname)
-            if os.path.exists(nfofile):
-                os.remove(nfofile)
-            # 检查空目录并删除
-            if re.findall(r"^S\d{2}|^Season", os.path.basename(filedir), re.I):
-                # 当前是季文件夹，判断并删除
-                seaon_dir = filedir
-                if seaon_dir.count('/') > 1 and not PathUtils.get_dir_files(seaon_dir, exts=settings.RMT_MEDIAEXT):
-                    shutil.rmtree(seaon_dir)
-                # 媒体文件夹
-                media_dir = os.path.dirname(seaon_dir)
-            else:
-                media_dir = filedir
-            # 检查并删除媒体文件夹，非根目录且目录大于二级，且没有媒体文件时才会删除
-            if media_dir != '/' \
-                    and media_dir.count('/') > 1 \
-                    and not re.search(r'[a-zA-Z]:/$', media_dir) \
-                    and not PathUtils.get_dir_files(media_dir, exts=settings.RMT_MEDIAEXT):
-                shutil.rmtree(media_dir)
-            return True, f"{file} 删除成功"
-        except Exception as e:
-            logger.error("删除源文件失败：%s" % str(e))
-            return True, f"{file} 删除失败"
 
     def get_state(self):
         return self._enabled

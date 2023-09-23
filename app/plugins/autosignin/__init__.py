@@ -14,6 +14,7 @@ from ruamel.yaml import CommentedMap
 from app import schemas
 from app.core.config import settings
 from app.core.event import EventManager, eventmanager, Event
+from app.db.models.site import Site
 from app.helper.browser import PlaywrightHelper
 from app.helper.cloudflare import under_challenge
 from app.helper.module import ModuleHelper
@@ -85,10 +86,17 @@ class AutoSignIn(_PluginBase):
             self._onlyonce = config.get("onlyonce")
             self._notify = config.get("notify")
             self._queue_cnt = config.get("queue_cnt") or 5
-            self._sign_sites = config.get("sign_sites")
-            self._login_sites = config.get("login_sites")
+            self._sign_sites = config.get("sign_sites") or []
+            self._login_sites = config.get("login_sites") or []
             self._retry_keyword = config.get("retry_keyword")
             self._clean = config.get("clean")
+
+            # 过滤掉已删除的站点
+            all_sites = [site for site in self.sites.get_indexers() if not site.get("public")]
+            self._sign_sites = [site.get("id") for site in all_sites if site.get("id") in self._sign_sites]
+            self._login_sites = [site.get("id") for site in all_sites if site.get("id") in self._login_sites]
+            # 保存配置
+            self.__update_config()
 
         # 加载模块
         if self._enabled or self._onlyonce:
@@ -237,8 +245,8 @@ class AutoSignIn(_PluginBase):
         拼装插件配置页面，需要返回两块数据：1、页面配置；2、数据结构
         """
         # 站点的可选项
-        site_options = [{"title": site.get("name"), "value": site.get("id")}
-                        for site in self.sites.get_indexers()]
+        site_options = [{"title": site.name, "value": site.id}
+                        for site in Site.list_order_by_pri(self.db)]
         return [
             {
                 'component': 'VForm',
@@ -575,6 +583,7 @@ class AutoSignIn(_PluginBase):
         yesterday_str = yesterday.strftime('%Y-%m-%d')
         # 删除昨天历史
         self.del_data(key=type + "-" + yesterday_str)
+        self.del_data(key=f"{yesterday.month}月{yesterday.day}日")
 
         # 查看今天有没有签到|登录历史
         today = today.strftime('%Y-%m-%d')
@@ -591,19 +600,14 @@ class AutoSignIn(_PluginBase):
         # 今日没数据
         if not today_history or self._clean:
             logger.info(f"今日 {today} 未{type}，开始{type}已选站点")
-            # 过滤删除的站点
-            if type == "签到":
-                self._sign_sites = [site.get("id") for site in do_sites if site]
-            if type == "登录":
-                self._login_sites = [site.get("id") for site in do_sites if site]
             if self._clean:
                 # 关闭开关
                 self._clean = False
         else:
             # 需要重试站点
-            retry_sites = today_history.get("retry")
+            retry_sites = today_history.get("retry") or []
             # 今天已签到|登录站点
-            already_sites = today_history.get("sign")
+            already_sites = today_history.get("do") or []
 
             # 今日未签|登录站点
             no_sites = [site for site in do_sites if
@@ -634,11 +638,22 @@ class AutoSignIn(_PluginBase):
             logger.info(f"站点{type}任务完成！")
             # 获取今天的日期
             key = f"{datetime.now().month}月{datetime.now().day}日"
+            today_data = self.get_data(key)
+            if today_data:
+                if not isinstance(today_data, list):
+                    today_data = [today_data]
+                for s in status:
+                    today_data.append({
+                        "site": s[0],
+                        "status": s[1]
+                    })
+            else:
+                today_data = [{
+                    "site": s[0],
+                    "status": s[1]
+                } for s in status]
             # 保存数据
-            self.save_data(key, [{
-                "site": s[0],
-                "status": s[1]
-            } for s in status])
+            self.save_data(key, today_data)
 
             # 命中重试词的站点id
             retry_sites = []
@@ -686,13 +701,13 @@ class AutoSignIn(_PluginBase):
 
             if not self._retry_keyword:
                 # 没设置重试关键词则重试已选站点
-                retry_sites = self._sign_sites
+                retry_sites = self._sign_sites if type == "签到" else self._login_sites
             logger.debug(f"下次{type}重试站点 {retry_sites}")
 
             # 存入历史
             self.save_data(key=type + "-" + today,
                            value={
-                               "sign": self._sign_sites,
+                               "do": self._sign_sites if type == "签到" else self._login_sites,
                                "retry": retry_sites
                            })
 
@@ -704,9 +719,9 @@ class AutoSignIn(_PluginBase):
                     signin_message += retry_msg
 
                 signin_message = "\n".join([f'【{s[0]}】{s[1]}' for s in signin_message if s])
-                self.post_message(title=f"站点自动{type}",
+                self.post_message(title=f"【站点自动{type}】",
                                   mtype=NotificationType.SiteMessage,
-                                  text=f"全部{type}数量: {len(list(self._sign_sites))} \n"
+                                  text=f"全部{type}数量: {len(self._sign_sites if type == '签到' else self._login_sites)} \n"
                                        f"本次{type}数量: {len(do_sites)} \n"
                                        f"下次{type}数量: {len(retry_sites) if self._retry_keyword else 0} \n"
                                        f"{signin_message}"
@@ -801,6 +816,10 @@ class AutoSignIn(_PluginBase):
                         return f"无法通过Cloudflare！"
                     return f"仿真登录失败，Cookie已失效！"
                 else:
+                    # 判断是否已签到
+                    if re.search(r'已签|签到已得', page_source, re.IGNORECASE) \
+                            or SiteUtils.is_checkin(page_source):
+                        return f"签到成功"
                     return "仿真签到成功"
             else:
                 res = RequestUtils(cookies=site_cookie,
@@ -930,30 +949,25 @@ class AutoSignIn(_PluginBase):
         site_id = event.event_data.get("site_id")
         config = self.get_config()
         if config:
-            sign_sites = config.get("sign_sites")
-            if sign_sites:
-                if isinstance(sign_sites, str):
-                    sign_sites = [sign_sites]
+            self._sign_sites = self.__remove_site_id(config.get("sign_sites") or [], site_id)
+            self._login_sites = self.__remove_site_id(config.get("login_sites") or [], site_id)
+            # 保存配置
+            self.__update_config()
 
-                # 删除对应站点
-                if site_id:
-                    sign_sites = [site for site in sign_sites if int(site) != int(site_id)]
-                else:
-                    # 清空
-                    sign_sites = []
+    def __remove_site_id(self, do_sites, site_id):
+        if do_sites:
+            if isinstance(do_sites, str):
+                do_sites = [do_sites]
 
-                # 若无站点，则停止
-                if len(sign_sites) == 0:
-                    self._enabled = False
+            # 删除对应站点
+            if site_id:
+                do_sites = [site for site in do_sites if int(site) != int(site_id)]
+            else:
+                # 清空
+                do_sites = []
 
-                # 保存配置
-                self.update_config(
-                    {
-                        "enabled": self._enabled,
-                        "notify": self._notify,
-                        "cron": self._cron,
-                        "onlyonce": self._onlyonce,
-                        "queue_cnt": self._queue_cnt,
-                        "sign_sites": sign_sites
-                    }
-                )
+            # 若无站点，则停止
+            if len(do_sites) == 0:
+                self._enabled = False
+
+        return do_sites

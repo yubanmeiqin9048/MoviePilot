@@ -25,7 +25,7 @@ router = APIRouter()
 
 
 @router.get("/env", summary="查询系统环境变量", response_model=schemas.Response)
-def get_setting(_: schemas.TokenPayload = Depends(verify_token)):
+def get_env_setting(_: schemas.TokenPayload = Depends(verify_token)):
     """
     查询系统环境变量，包括当前版本号
     """
@@ -83,7 +83,7 @@ def set_setting(key: str, value: Union[list, dict, str, int] = None,
 
 
 @router.get("/message", summary="实时消息")
-def get_progress(token: str):
+def get_message(token: str):
     """
     实时获取系统消息，返回格式为SSE
     """
@@ -169,31 +169,33 @@ def latest_version(_: schemas.TokenPayload = Depends(verify_token)):
     return schemas.Response(success=False)
 
 
-@router.get("/ruletest", summary="过滤规则测试", response_model=schemas.Response)
+@router.get("/ruletest", summary="优先级规则测试", response_model=schemas.Response)
 def ruletest(title: str,
              subtitle: str = None,
              ruletype: str = None,
              db: Session = Depends(get_db),
              _: schemas.TokenPayload = Depends(verify_token)):
     """
-    过滤规则测试，规则类型 1-订阅，2-洗版
+    过滤规则测试，规则类型 1-订阅，2-洗版，3-搜索
     """
     torrent = schemas.TorrentInfo(
         title=title,
         description=subtitle,
     )
     if ruletype == "2":
-        rule_string = SystemConfigOper().get(SystemConfigKey.FilterRules2)
+        rule_string = SystemConfigOper().get(SystemConfigKey.BestVersionFilterRules)
+    elif ruletype == "3":
+        rule_string = SystemConfigOper().get(SystemConfigKey.SearchFilterRules)
     else:
-        rule_string = SystemConfigOper().get(SystemConfigKey.FilterRules)
+        rule_string = SystemConfigOper().get(SystemConfigKey.SubscribeFilterRules)
     if not rule_string:
-        return schemas.Response(success=False, message="过滤规则未设置！")
+        return schemas.Response(success=False, message="优先级规则未设置！")
 
     # 过滤
     result = SearchChain(db).filter_torrents(rule_string=rule_string,
                                              torrent_list=[torrent])
     if not result:
-        return schemas.Response(success=False, message="不符合过滤规则！")
+        return schemas.Response(success=False, message="不符合优先级规则！")
     return schemas.Response(success=True, data={
         "priority": 100 - result[0].pri_order + 1
     })

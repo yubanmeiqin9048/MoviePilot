@@ -66,13 +66,17 @@ class Settings(BaseSettings):
     RMT_AUDIO_TRACK_EXT: list = ['.mka']
     # 索引器
     INDEXER: str = "builtin"
+    # 订阅模式
+    SUBSCRIBE_MODE: str = "spider"
+    # RSS订阅模式刷新时间间隔（分钟）
+    SUBSCRIBE_RSS_INTERVAL: int = 30
     # 订阅搜索开关
     SUBSCRIBE_SEARCH: bool = False
-    # 用户认证站点 hhclub/audiences/hddolby/zmpt/freefarm/hdfans/wintersakura/leaves/1ptba/icc2022/iyuu
+    # 用户认证站点
     AUTH_SITE: str = ""
     # 交互搜索自动下载用户ID，使用,分割
     AUTO_DOWNLOAD_USER: str = None
-    # 消息通知渠道 telegram/wechat/slack
+    # 消息通知渠道 telegram/wechat/slack，多个通知渠道用,分隔
     MESSAGER: str = "telegram"
     # WeChat企业ID
     WECHAT_CORPID: str = None
@@ -102,6 +106,10 @@ class Settings(BaseSettings):
     SLACK_APP_TOKEN: str = ""
     # Slack 频道名称
     SLACK_CHANNEL: str = ""
+    # SynologyChat Webhook
+    SYNOLOGYCHAT_WEBHOOK: str = ""
+    # SynologyChat Token
+    SYNOLOGYCHAT_TOKEN: str = ""
     # 下载器 qbittorrent/transmission
     DOWNLOADER: str = "qbittorrent"
     # 下载器监控开关
@@ -134,12 +142,14 @@ class Settings(BaseSettings):
     DOWNLOAD_CATEGORY: bool = False
     # 下载站点字幕
     DOWNLOAD_SUBTITLE: bool = True
-    # 媒体服务器 emby/jellyfin/plex
+    # 媒体服务器 emby/jellyfin/plex，多个媒体服务器,分割
     MEDIASERVER: str = "emby"
     # 入库刷新媒体库
     REFRESH_MEDIASERVER: bool = True
     # 媒体服务器同步间隔（小时）
     MEDIASERVER_SYNC_INTERVAL: int = 6
+    # 媒体服务器同步黑名单，多个媒体库名称,分割
+    MEDIASERVER_SYNC_BLACKLIST: str = None
     # EMBY服务器地址，IP:PORT
     EMBY_HOST: str = None
     # EMBY Api Key

@@ -48,7 +48,7 @@ class SystemConfigKey(Enum):
     UserInstalledPlugins = "UserInstalledPlugins"
     # 搜索结果
     SearchResults = "SearchResults"
-    # 索引站点范围
+    # 搜索站点范围
     IndexerSites = "IndexerSites"
     # 订阅站点范围
     RssSites = "RssSites"
@@ -60,10 +60,14 @@ class SystemConfigKey(Enum):
     CustomReleaseGroups = "CustomReleaseGroups"
     # 自定义识别词
     CustomIdentifiers = "CustomIdentifiers"
-    # 过滤规则
-    FilterRules = "FilterRules"
+    # 搜索优先级规则
+    SearchFilterRules = "SearchFilterRules"
+    # 订阅优先级规则
+    SubscribeFilterRules = "SubscribeFilterRules"
     # 洗版规则
-    FilterRules2 = "FilterRules2"
+    BestVersionFilterRules = "BestVersionFilterRules"
+    # 默认过滤规则
+    DefaultFilterRules = "DefaultFilterRules"
     # 转移屏蔽词
     TransferExcludeWords = "TransferExcludeWords"
 
@@ -105,3 +109,4 @@ class MessageChannel(Enum):
     Wechat = "微信"
     Telegram = "Telegram"
     Slack = "Slack"
+    SynologyChat = "SynologyChat"

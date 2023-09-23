@@ -1,4 +1,5 @@
 import pickle
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict
@@ -80,7 +81,8 @@ class SearchChain(ChainBase):
                 keyword: str = None,
                 no_exists: Dict[int, Dict[int, NotExistMediaInfo]] = None,
                 sites: List[int] = None,
-                filter_rule: str = None,
+                priority_rule: str = None,
+                filter_rule: Dict[str, str] = None,
                 area: str = "title") -> List[Context]:
         """
         根据媒体信息搜索种子资源，精确匹配，应用过滤规则，同时根据no_exists过滤本地已存在的资源
@@ -88,6 +90,7 @@ class SearchChain(ChainBase):
         :param keyword: 搜索关键词
         :param no_exists: 缺失的媒体信息
         :param sites: 站点ID列表，为空时搜索所有站点
+        :param priority_rule: 优先级规则，为空时使用搜索优先级规则
         :param filter_rule: 过滤规则，为空是使用默认过滤规则
         :param area: 搜索范围，title or imdbid
         """
@@ -128,19 +131,26 @@ class SearchChain(ChainBase):
             logger.warn(f'{keyword or mediainfo.title} 未搜索到资源')
             return []
         # 过滤种子
-        if filter_rule is None:
-            # 取默认过滤规则
-            filter_rule = self.systemconfig.get(SystemConfigKey.FilterRules)
-        if filter_rule:
-            logger.info(f'开始过滤资源，当前规则：{filter_rule} ...')
-            result: List[TorrentInfo] = self.filter_torrents(rule_string=filter_rule,
+        if priority_rule is None:
+            # 取搜索优先级规则
+            priority_rule = self.systemconfig.get(SystemConfigKey.SearchFilterRules)
+        if priority_rule:
+            logger.info(f'开始过滤资源，当前规则：{priority_rule} ...')
+            result: List[TorrentInfo] = self.filter_torrents(rule_string=priority_rule,
                                                              torrent_list=torrents,
-                                                             season_episodes=season_episodes)
+                                                             season_episodes=season_episodes,
+                                                             mediainfo=mediainfo)
             if result is not None:
                 torrents = result
             if not torrents:
-                logger.warn(f'{keyword or mediainfo.title} 没有符合过滤条件的资源')
+                logger.warn(f'{keyword or mediainfo.title} 没有符合优先级规则的资源')
                 return []
+        # 使用默认过滤规则再次过滤
+        torrents = self.filter_torrents_by_rule(torrents=torrents,
+                                                filter_rule=filter_rule)
+        if not torrents:
+            logger.warn(f'{keyword or mediainfo.title} 没有符合过滤规则的资源')
+            return []
         # 匹配的资源
         _match_torrents = []
         # 总数
@@ -185,19 +195,30 @@ class SearchChain(ChainBase):
                                                      str(int(mediainfo.year) + 1)]:
                             logger.warn(f'{torrent.site_name} - {torrent.title} 年份不匹配')
                             continue
-                # 比对标题
+                # 比对标题和原语种标题
                 meta_name = StringUtils.clear_upper(torrent_meta.name)
                 if meta_name in [
                     StringUtils.clear_upper(mediainfo.title),
                     StringUtils.clear_upper(mediainfo.original_title)
                 ]:
-                    logger.info(f'{mediainfo.title} 匹配到资源：{torrent.site_name} - {torrent.title}')
+                    logger.info(f'{mediainfo.title} 通过标题匹配到资源：{torrent.site_name} - {torrent.title}')
                     _match_torrents.append(torrent)
                     continue
+                # 在副标题中判断是否存在标题与原语种标题
+                if torrent.description:
+                    subtitle = torrent.description.split()
+                    if (StringUtils.is_chinese(mediainfo.title)
+                        and str(mediainfo.title) in subtitle) \
+                            or (StringUtils.is_chinese(mediainfo.original_title)
+                                and str(mediainfo.original_title) in subtitle):
+                        logger.info(f'{mediainfo.title} 通过副标题匹配到资源：{torrent.site_name} - {torrent.title}，'
+                                    f'副标题：{torrent.description}')
+                        _match_torrents.append(torrent)
+                        continue
                 # 比对别名和译名
                 for name in mediainfo.names:
                     if StringUtils.clear_upper(name) == meta_name:
-                        logger.info(f'{mediainfo.title} 匹配到资源：{torrent.site_name} - {torrent.title}')
+                        logger.info(f'{mediainfo.title} 通过别名或译名匹配到资源：{torrent.site_name} - {torrent.title}')
                         _match_torrents.append(torrent)
                         break
                 else:
@@ -236,14 +257,14 @@ class SearchChain(ChainBase):
         """
         # 未开启的站点不搜索
         indexer_sites = []
+
         # 配置的索引站点
-        if sites:
-            config_indexers = [str(sid) for sid in sites]
-        else:
-            config_indexers = [str(sid) for sid in self.systemconfig.get(SystemConfigKey.IndexerSites) or []]
+        if not sites:
+            sites = self.systemconfig.get(SystemConfigKey.IndexerSites) or []
+
         for indexer in self.siteshelper.get_indexers():
             # 检查站点索引开关
-            if not config_indexers or str(indexer.get("id")) in config_indexers:
+            if not sites or indexer.get("id") in sites:
                 # 站点流控
                 state, msg = self.siteshelper.check(indexer.get("domain"))
                 if state:
@@ -253,6 +274,7 @@ class SearchChain(ChainBase):
         if not indexer_sites:
             logger.warn('未开启任何有效站点，无法搜索资源')
             return []
+
         # 开始进度
         self.progress.start(ProgressKey.Search)
         # 开始计时
@@ -294,3 +316,44 @@ class SearchChain(ChainBase):
         self.progress.end(ProgressKey.Search)
         # 返回
         return results
+
+    def filter_torrents_by_rule(self,
+                                torrents: List[TorrentInfo],
+                                filter_rule: Dict[str, str] = None
+                                ) -> List[TorrentInfo]:
+        """
+        使用过滤规则过滤种子
+        :param torrents: 种子列表
+        :param filter_rule: 过滤规则
+        """
+
+        # 取默认过滤规则
+        if not filter_rule:
+            filter_rule = self.systemconfig.get(SystemConfigKey.DefaultFilterRules)
+        if not filter_rule:
+            return torrents
+        # 包含
+        include = filter_rule.get("include")
+        # 排除
+        exclude = filter_rule.get("exclude")
+
+        def __filter_torrent(t: TorrentInfo) -> bool:
+            """
+            过滤种子
+            """
+            # 包含
+            if include:
+                if not re.search(r"%s" % include,
+                                 f"{t.title} {t.description}", re.I):
+                    logger.info(f"{t.title} 不匹配包含规则 {include}")
+                    return False
+            # 排除
+            if exclude:
+                if re.search(r"%s" % exclude,
+                             f"{t.title} {t.description}", re.I):
+                    logger.info(f"{t.title} 匹配排除规则 {exclude}")
+                    return False
+            return True
+
+        # 使用默认过滤规则再次过滤
+        return list(filter(lambda t: __filter_torrent(t), torrents))

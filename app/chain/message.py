@@ -214,6 +214,11 @@ class MessageChain(ChainBase):
                 start = _current_page * self._page_size
                 end = start + self._page_size
             if cache_type == "Torrent":
+                # 更新缓存
+                user_cache[userid] = {
+                    "type": "Torrent",
+                    "items": cache_list[start:end]
+                }
                 # 发送种子数据
                 self.__post_torrents_message(channel=channel,
                                              title=_current_media.title,
@@ -251,6 +256,11 @@ class MessageChain(ChainBase):
                 # 加一页
                 _current_page += 1
                 if cache_type == "Torrent":
+                    # 更新缓存
+                    user_cache[userid] = {
+                        "type": "Torrent",
+                        "items": cache_list
+                    }
                     # 发送种子数据
                     self.__post_torrents_message(channel=channel,
                                                  title=_current_media.title,
@@ -270,7 +280,7 @@ class MessageChain(ChainBase):
             elif text.startswith("#") \
                     or re.search(r"^请[问帮你]", text) \
                     or re.search(r"[?？]$", text) \
-                    or StringUtils.count_words(text) > 15 \
+                    or StringUtils.count_words(text) > 10 \
                     or text.find("继续") != -1:
                 # 聊天
                 content = text
@@ -338,6 +348,7 @@ class MessageChain(ChainBase):
         # 批量下载
         downloads, lefts = self.downloadchain.batch_download(contexts=cache_list,
                                                              no_exists=no_exists,
+                                                             channel=channel,
                                                              userid=userid)
         if downloads and not lefts:
             # 全部下载完成

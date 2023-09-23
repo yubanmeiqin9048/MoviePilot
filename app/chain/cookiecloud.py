@@ -13,6 +13,7 @@ from app.db.siteicon_oper import SiteIconOper
 from app.helper.cloudflare import under_challenge
 from app.helper.cookiecloud import CookieCloudHelper
 from app.helper.message import MessageHelper
+from app.helper.rss import RssHelper
 from app.helper.sites import SitesHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType, MessageChannel
@@ -30,6 +31,7 @@ class CookieCloudChain(ChainBase):
         self.siteoper = SiteOper(self._db)
         self.siteiconoper = SiteIconOper(self._db)
         self.siteshelper = SitesHelper()
+        self.rsshelper = RssHelper()
         self.sitechain = SiteChain(self._db)
         self.message = MessageHelper()
         self.cookiecloud = CookieCloudHelper(
@@ -78,8 +80,23 @@ class CookieCloudChain(ChainBase):
                 # 更新站点Cookie
                 if status:
                     logger.info(f"站点【{site_info.name}】连通性正常，不同步CookieCloud数据")
+                    # 更新站点rss地址
+                    if not site_info.public and not site_info.rss:
+                        # 自动生成rss地址
+                        rss_url, errmsg = self.rsshelper.get_rss_link(
+                            url=site_info.url,
+                            cookie=cookie,
+                            ua=settings.USER_AGENT,
+                            proxy=True if site_info.proxy else False
+                        )
+                        if rss_url:
+                            logger.info(f"更新站点 {domain} RSS地址 ...")
+                            self.siteoper.update_rss(domain=domain, rss=rss_url)
+                        else:
+                            logger.warn(errmsg)
                     continue
                 # 更新站点Cookie
+                logger.info(f"更新站点 {domain} Cookie ...")
                 self.siteoper.update_cookie(domain=domain, cookies=cookie)
                 _update_count += 1
             elif indexer:
@@ -104,12 +121,25 @@ class CookieCloudChain(ChainBase):
                     _fail_count += 1
                     logger.warn(f"站点 {indexer.get('name')} 连接失败，无法添加站点")
                     continue
+                # 获取rss地址
+                rss_url = None
+                if not indexer.get("public") and indexer.get("domain"):
+                    # 自动生成rss地址
+                    rss_url, errmsg = self.rsshelper.get_rss_link(url=indexer.get("domain"),
+                                                                  cookie=cookie,
+                                                                  ua=settings.USER_AGENT)
+                    if errmsg:
+                        logger.warn(errmsg)
+                # 插入数据库
+                logger.info(f"新增站点 {indexer.get('name')} ...")
                 self.siteoper.add(name=indexer.get("name"),
                                   url=indexer.get("domain"),
                                   domain=domain,
                                   cookie=cookie,
+                                  rss=rss_url,
                                   public=1 if indexer.get("public") else 0)
                 _add_count += 1
+
             # 保存站点图标
             if indexer:
                 site_icon = self.siteiconoper.get_by_domain(domain)

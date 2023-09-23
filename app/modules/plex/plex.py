@@ -128,11 +128,17 @@ class Plex(metaclass=Singleton):
             "EpisodeCount": EpisodeCount
         }
 
-    def get_movies(self, title: str, year: str = None) -> Optional[List[dict]]:
+    def get_movies(self, 
+                   title: str, 
+                   original_title: str = None,
+                   year: str = None,
+                   tmdb_id: int = None) -> Optional[List[dict]]:
         """
         根据标题和年份，检查电影是否在Plex中存在，存在则返回列表
         :param title: 标题
+        :param original_title: 原产地标题
         :param year: 年份，为空则不过滤
+        :param tmdb_id: TMDB ID
         :return: 含title、year属性的字典列表
         """
         if not self._plex:
@@ -140,22 +146,35 @@ class Plex(metaclass=Singleton):
         ret_movies = []
         if year:
             movies = self._plex.library.search(title=title, year=year, libtype="movie")
+            # 根据原标题再查一遍
+            if original_title and str(original_title) != str(title):
+                movies.extend(self._plex.library.search(title=original_title, year=year, libtype="movie"))
         else:
             movies = self._plex.library.search(title=title, libtype="movie")
-        for movie in movies:
+            if original_title and str(original_title) != str(title):
+                movies.extend(self._plex.library.search(title=original_title, year=year, libtype="movie"))
+        for movie in set(movies):
+            movie_tmdbid = self.__get_ids(movie.guids).get("tmdb_id")
+            if tmdb_id and movie_tmdbid:
+                if str(movie_tmdbid) != str(tmdb_id):
+                    continue
             ret_movies.append({'title': movie.title, 'year': movie.year})
         return ret_movies
 
     def get_tv_episodes(self,
                         item_ids: List[str] = [],
                         title: str = None,
+                        original_title: str = None,
                         year: str = None,
+                        tmdb_id: int = None,
                         season: int = None) -> Optional[Dict[int, list]]:
         """
         根据标题、年份、季查询电视剧所有集信息
         :param item_id: 媒体ID列表
         :param title: 标题
+        :param original_title: 原产地标题
         :param year: 年份，可以为空，为空时不按年份过滤
+        :param tmdb_id: TMDB ID
         :param season: 季号，数字
         :return: 所有集的列表
         """
@@ -164,13 +183,19 @@ class Plex(metaclass=Singleton):
         if item_ids:
             videos = self._plex.library.sectionByID(item_ids[0]).all()
         else:
+            # 根据标题和年份模糊搜索，该结果不够准确
             videos = self._plex.library.search(title=title, year=year, libtype="show")
+            if not videos and original_title and str(original_title) != str(title):
+                videos = self._plex.library.search(title=original_title, year=year, libtype="show")
         if not videos:
             return {}
         if isinstance(videos, list):
-            episodes = videos[0].episodes()
-        else:
-            episodes = videos.episodes()
+            videos = videos[0]
+        video_tmdbid = self.__get_ids(videos.guids).get('tmdb_id')
+        if tmdb_id and video_tmdbid:
+            if str(video_tmdbid) != str(tmdb_id):
+                return {}
+        episodes = videos.episodes()
         season_episodes = {}
         for episode in episodes:
             if season and episode.seasonNumber != int(season):
@@ -253,7 +278,7 @@ class Plex(metaclass=Singleton):
                 if hasattr(lib, "locations") and lib.locations:
                     for location in lib.locations:
                         if is_subpath(path, Path(location)):
-                            return lib.key, location
+                            return lib.key, str(path)
         except Exception as err:
             logger.error(f"查找媒体库出错：{err}")
         return "", ""
@@ -328,7 +353,7 @@ class Plex(metaclass=Singleton):
             logger.error(f"获取媒体库列表出错：{err}")
         yield {}
 
-    def get_webhook_message(self, message_str: str) -> WebhookEventInfo:
+    def get_webhook_message(self, form: any) -> Optional[WebhookEventInfo]:
         """
         解析Plex报文
         eventItem  字段的含义
@@ -337,10 +362,116 @@ class Plex(metaclass=Singleton):
         item_name  TV:琅琊榜 S1E6 剖心明志 虎口脱险
                    MOV:猪猪侠大冒险(2001)
         overview   剧情描述
+        {
+          "event": "media.scrobble",
+          "user": false,
+          "owner": true,
+          "Account": {
+            "id": 31646104,
+            "thumb": "https://plex.tv/users/xx",
+            "title": "播放"
+          },
+          "Server": {
+            "title": "Media-Server",
+            "uuid": "xxxx"
+          },
+          "Player": {
+            "local": false,
+            "publicAddress": "xx.xx.xx.xx",
+            "title": "MagicBook",
+            "uuid": "wu0uoa1ujfq90t0c5p9f7fw0"
+          },
+          "Metadata": {
+            "librarySectionType": "show",
+            "ratingKey": "40294",
+            "key": "/library/metadata/40294",
+            "parentRatingKey": "40291",
+            "grandparentRatingKey": "40275",
+            "guid": "plex://episode/615580a9fa828e7f1a0caabd",
+            "parentGuid": "plex://season/615580a9fa828e7f1a0caab8",
+            "grandparentGuid": "plex://show/60e81fd8d8000e002d7d2976",
+            "type": "episode",
+            "title": "The World's Strongest Senior",
+            "titleSort": "World's Strongest Senior",
+            "grandparentKey": "/library/metadata/40275",
+            "parentKey": "/library/metadata/40291",
+            "librarySectionTitle": "动漫剧集",
+            "librarySectionID": 7,
+            "librarySectionKey": "/library/sections/7",
+            "grandparentTitle": "范马刃牙",
+            "parentTitle": "Combat Shadow Fighting Saga / Great Prison Battle Saga",
+            "originalTitle": "Baki Hanma",
+            "contentRating": "TV-MA",
+            "summary": "The world is shaken by news of a man taking down a monstrous elephant with his bare hands. Back in Japan, Baki is confronted by a knife-wielding child.",
+            "index": 1,
+            "parentIndex": 1,
+            "audienceRating": 8.5,
+            "viewCount": 1,
+            "lastViewedAt": 1694320444,
+            "year": 2021,
+            "thumb": "/library/metadata/40294/thumb/1693544504",
+            "art": "/library/metadata/40275/art/1693952979",
+            "parentThumb": "/library/metadata/40291/thumb/1691115271",
+            "grandparentThumb": "/library/metadata/40275/thumb/1693952979",
+            "grandparentArt": "/library/metadata/40275/art/1693952979",
+            "duration": 1500000,
+            "originallyAvailableAt": "2021-09-30",
+            "addedAt": 1691115281,
+            "updatedAt": 1693544504,
+            "audienceRatingImage": "themoviedb://image.rating",
+            "Guid": [
+              {
+                "id": "imdb://tt14765720"
+              },
+              {
+                "id": "tmdb://3087250"
+              },
+              {
+                "id": "tvdb://8530933"
+              }
+            ],
+            "Rating": [
+              {
+                "image": "themoviedb://image.rating",
+                "value": 8.5,
+                "type": "audience"
+              }
+            ],
+            "Director": [
+              {
+                "id": 115144,
+                "filter": "director=115144",
+                "tag": "Keiya Saito",
+                "tagKey": "5f401c8d04a86500409ea6c1"
+              }
+            ],
+            "Writer": [
+              {
+                "id": 115135,
+                "filter": "writer=115135",
+                "tag": "Tatsuhiko Urahata",
+                "tagKey": "5d7768e07a53e9001e6db1ce",
+                "thumb": "https://metadata-static.plex.tv/f/people/f6f90dc89fa87d459f85d40a09720c05.jpg"
+              }
+            ]
+          }
+        }
         """
-        message = json.loads(message_str)
+        if not form:
+            return None
+        payload = form.get("payload")
+        if not payload:
+            return None
+        try:
+            message = json.loads(payload)
+        except Exception as e:
+            logger.debug(f"解析plex webhook出错：{str(e)}")
+            return None
+        eventType = message.get('event')
+        if not eventType:
+            return None
         logger.info(f"接收到plex webhook：{message}")
-        eventItem = WebhookEventInfo(event=message.get('Event', ''), channel="plex")
+        eventItem = WebhookEventInfo(event=eventType, channel="plex")
         if message.get('Metadata'):
             if message.get('Metadata', {}).get('type') == 'episode':
                 eventItem.item_type = "TV"

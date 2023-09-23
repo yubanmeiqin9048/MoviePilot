@@ -52,7 +52,7 @@ class Telegram(metaclass=Singleton):
                 定义线程函数来运行 infinity_polling
                 """
                 try:
-                    _bot.infinity_polling(long_polling_timeout=10)
+                    _bot.infinity_polling(long_polling_timeout=30, logger_level=None)
                 except Exception as err:
                     logger.error(f"Telegram消息接收服务异常：{err}")
 
@@ -153,6 +153,7 @@ class Telegram(metaclass=Singleton):
                 link = torrent.page_url
                 title = f"{meta.season_episode} " \
                         f"{meta.resource_term} " \
+                        f"{meta.video_term} " \
                         f"{meta.release_group}"
                 title = re.sub(r"\s+", " ", title).strip()
                 free = torrent.volume_factor

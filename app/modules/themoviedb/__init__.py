@@ -74,8 +74,8 @@ class TheMovieDbModule(_ModuleBase):
                                                mtype=meta.type,
                                                season_year=meta.year,
                                                season_number=meta.begin_season)
-                        if meta.year:
-                            # 非严格模式下去掉年份再查一次
+                        if not info:
+                            # 去掉年份再查一次
                             info = self.tmdb.match(name=meta.name,
                                                    mtype=meta.type)
                     else:
@@ -134,9 +134,10 @@ class TheMovieDbModule(_ModuleBase):
                             f"{mediainfo.title_year}")
 
             # 补充剧集年份
-            episode_years = self.tmdb.get_tv_episode_years(info.get("id"))
-            if episode_years:
-                mediainfo.season_years = episode_years
+            if mediainfo.type == MediaType.TV:
+                episode_years = self.tmdb.get_tv_episode_years(info.get("id"))
+                if episode_years:
+                    mediainfo.season_years = episode_years
             return mediainfo
         else:
             logger.info(f"{meta.name if meta else tmdbid} 未匹配到媒体信息")

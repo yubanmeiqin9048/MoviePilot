@@ -59,9 +59,9 @@ docker pull jxxghp/moviepilot:latest
 - **PROXY_HOST：** 网络代理（可选），访问themoviedb或者重启更新需要使用代理访问，格式为`http(s)://ip:port`
 - **TMDB_API_DOMAIN：** TMDB API地址，默认`api.themoviedb.org`，也可配置为`api.tmdb.org`或其它中转代理服务地址，能连通即可
 - **DOWNLOAD_PATH：** 下载保存目录，**注意：需要将`moviepilot`及`下载器`的映射路径保持一致**，否则会导致下载文件无法转移
-- **DOWNLOAD_MOVIE_PATH：** 电影下载保存目录，**必须是`DOWNLOAD_PATH`的下级路径**，不设置则下载到`DOWNLOAD_PATH`
-- **DOWNLOAD_TV_PATH：** 电视剧下载保存目录，**必须是`DOWNLOAD_PATH`的下级路径**，不设置则下载到`DOWNLOAD_PATH`
-- **DOWNLOAD_ANIME_PATH：** 动漫下载保存目录，**必须是`DOWNLOAD_PATH`的下级路径**，不设置则下载到`DOWNLOAD_PATH`
+- **DOWNLOAD_MOVIE_PATH：** 电影下载保存目录，不设置则下载到`DOWNLOAD_PATH`
+- **DOWNLOAD_TV_PATH：** 电视剧下载保存目录，不设置则下载到`DOWNLOAD_PATH`
+- **DOWNLOAD_ANIME_PATH：** 动漫下载保存目录，不设置则下载到`DOWNLOAD_PATH`
 - **DOWNLOAD_CATEGORY：** 下载二级分类开关，`true`/`false`，默认`false`，开启后会根据配置`category.yaml`自动在下载目录下建立二级目录分类
 - **DOWNLOAD_SUBTITLE：** 下载站点字幕，`true`/`false`，默认`true`
 - **REFRESH_MEDIASERVER：** 入库刷新媒体库，`true`/`false`，默认`true`
@@ -81,8 +81,10 @@ docker pull jxxghp/moviepilot:latest
 - **OCR_HOST：** OCR识别服务器地址，格式：`http(s)://ip:port`，用于识别站点二维码实现自动登录获取Cookie等，不配置默认使用内建服务器`https://movie-pilot.org`，可使用 [这个镜像](https://hub.docker.com/r/jxxghp/moviepilot-ocr) 自行搭建。
 - **USER_AGENT：** CookieCloud对应的浏览器UA，可选，设置后可增加连接站点的成功率，同步站点后可以在管理界面中修改
 - **AUTO_DOWNLOAD_USER：** 交互搜索自动下载用户ID，使用,分割
+- **SUBSCRIBE_MODE：** 订阅模式，`rss`/`spider`，默认`spider`，`rss`模式通过定时刷新RSS来匹配订阅（RSS地址会自动获取，也可手动维护），对站点压力小，同时可设置订阅刷新周期，24小时运行，但订阅和下载通知不能过滤和显示免费，推荐使用rss模式。
+- **SUBSCRIBE_RSS_INTERVAL：** RSS订阅模式刷新时间间隔（分钟），默认`30`分钟，不能小于5分钟。
 - **SUBSCRIBE_SEARCH：** 订阅搜索，`true`/`false`，默认`false`，开启后会每隔24小时对所有订阅进行全量搜索，以补齐缺失剧集（一般情况下正常订阅即可，订阅搜索只做为兜底，会增加站点压力，不建议开启）。
-- **MESSAGER：** 消息通知渠道，支持 `telegram`/`wechat`/`slack`，开启多个渠道时使用`,`分隔。同时还需要配置对应渠道的环境变量，非对应渠道的变量可删除，推荐使用`telegram`
+- **MESSAGER：** 消息通知渠道，支持 `telegram`/`wechat`/`slack`/`synologychat`，开启多个渠道时使用`,`分隔。同时还需要配置对应渠道的环境变量，非对应渠道的变量可删除，推荐使用`telegram`
 
   - `wechat`设置项：
 
@@ -106,6 +108,11 @@ docker pull jxxghp/moviepilot:latest
     - **SLACK_OAUTH_TOKEN：** Slack Bot User OAuth Token
     - **SLACK_APP_TOKEN：** Slack App-Level Token
     - **SLACK_CHANNEL：** Slack 频道名称，默认`全体`
+  
+  - `synologychat`设置项：
+
+    - **SYNOLOGYCHAT_WEBHOOK：** 在Synology Chat中创建机器人，获取机器人`传入URL`
+    - **SYNOLOGYCHAT_TOKEN：** SynologyChat机器人`令牌`
 
 
 - **DOWNLOADER：** 下载器，支持`qbittorrent`/`transmission`，QB版本号要求>= 4.3.9，TR版本号要求>= 3.0，同时还需要配置对应渠道的环境变量，非对应渠道的变量可删除，推荐使用`qbittorrent`
@@ -125,7 +132,7 @@ docker pull jxxghp/moviepilot:latest
 
 - **DOWNLOADER_MONITOR：** 下载器监控，`true`/`false`，默认为`true`，开启后下载完成时才会自动整理入库
 
-- **MEDIASERVER：** 媒体服务器，支持`emby`/`jellyfin`/`plex`，同时还需要配置对应媒体服务器的环境变量，非对应媒体服务器的变量可删除，推荐使用`emby`
+- **MEDIASERVER：** 媒体服务器，支持`emby`/`jellyfin`/`plex`，同时开启多个使用`,`分隔。还需要配置对应媒体服务器的环境变量，非对应媒体服务器的变量可删除，推荐使用`emby`
 
   - `emby`设置项：
 
@@ -143,27 +150,29 @@ docker pull jxxghp/moviepilot:latest
     - **PLEX_TOKEN：** Plex网页Url中的`X-Plex-Token`，通过浏览器F12->网络从请求URL中获取
 
 - **MEDIASERVER_SYNC_INTERVAL:** 媒体服务器同步间隔（小时），默认`6`，留空则不同步
+- **MEDIASERVER_SYNC_BLACKLIST:** 媒体服务器同步黑名单，多个媒体库名称使用,分割
 
 
 ### 2. **用户认证**
 
-- **AUTH_SITE：** 认证站点，支持`hhclub`/`audiences`/`hddolby`/`zmpt`/`freefarm`/`hdfans`/`wintersakura`/`leaves`/`1ptba`/`icc2022`/`iyuu`
+- **AUTH_SITE：** 认证站点，支持`iyuu`/`hhclub`/`audiences`/`hddolby`/`zmpt`/`freefarm`/`hdfans`/`wintersakura`/`leaves`/`1ptba`/`icc2022`/`ptlsp`
 
 `MoviePilot`需要认证后才能使用，配置`AUTH_SITE`后，需要根据下表配置对应站点的认证参数。
 
-| 站点 | 参数                                                    |
-|:--:|:-----------------------------------------------------:|
-| iyuu | `IYUU_SIGN`：IYUU登录令牌                                  |
-| hhclub | `HHCLUB_USERNAME`：用户名<br/>`HHCLUB_PASSKEY`：密钥         |
-| audiences | `AUDIENCES_UID`：用户ID<br/>`AUDIENCES_PASSKEY`：密钥       |
-| hddolby | `HDDOLBY_ID`：用户ID<br/>`HDDOLBY_PASSKEY`：密钥            |
-| zmpt | `ZMPT_UID`：用户ID<br/>`ZMPT_PASSKEY`：密钥                 |
-| freefarm | `FREEFARM_UID`：用户ID<br/>`FREEFARM_PASSKEY`：密钥         |
-| hdfans | `HDFANS_UID`：用户ID<br/>`HDFANS_PASSKEY`：密钥             |
+|      站点      |                          参数                           |
+|:------------:|:-----------------------------------------------------:|
+|     iyuu     |                 `IYUU_SIGN`：IYUU登录令牌                  |
+|    hhclub    |     `HHCLUB_USERNAME`：用户名<br/>`HHCLUB_PASSKEY`：密钥     |
+|  audiences   |    `AUDIENCES_UID`：用户ID<br/>`AUDIENCES_PASSKEY`：密钥    |
+|   hddolby    |      `HDDOLBY_ID`：用户ID<br/>`HDDOLBY_PASSKEY`：密钥       |
+|     zmpt     |         `ZMPT_UID`：用户ID<br/>`ZMPT_PASSKEY`：密钥         |
+|   freefarm   |     `FREEFARM_UID`：用户ID<br/>`FREEFARM_PASSKEY`：密钥     |
+|    hdfans    |       `HDFANS_UID`：用户ID<br/>`HDFANS_PASSKEY`：密钥       |
 | wintersakura | `WINTERSAKURA_UID`：用户ID<br/>`WINTERSAKURA_PASSKEY`：密钥 |
-| leaves | `LEAVES_UID`：用户ID<br/>`LEAVES_PASSKEY`：密钥             |
-| 1ptba | `1PTBA_UID`：用户ID<br/>`1PTBA_PASSKEY`：密钥               |
-| icc2022 | `ICC2022_UID`：用户ID<br/>`ICC2022_PASSKEY`：密钥           |
+|    leaves    |       `LEAVES_UID`：用户ID<br/>`LEAVES_PASSKEY`：密钥       |
+|    1ptba     |        `1PTBA_UID`：用户ID<br/>`1PTBA_PASSKEY`：密钥        |
+|   icc2022    |      `ICC2022_UID`：用户ID<br/>`ICC2022_PASSKEY`：密钥      |
+|    ptlsp     |        `PTLSP_UID`：用户ID<br/>`PTLSP_PASSKEY`：密钥        |
 
 
 ### 2. **进阶配置**
@@ -225,9 +234,9 @@ docker pull jxxghp/moviepilot:latest
 - 通过CookieCloud同步快速同步站点，不需要使用的站点可在WEB管理界面中禁用，无法同步的站点可手动新增。
 - 通过WEB进行管理，将WEB添加到手机桌面获得类App使用效果，管理界面端口：`3000`，后台API端口：`3001`。
 - 通过下载器监控或使用目录监控插件实现自动整理入库刮削（二选一）。
-- 通过微信/Telegram/Slack远程管理，其中微信/Telegram将会自动添加操作菜单（微信菜单条数有限制，部分菜单不显示），微信需要在官方页面设置回调地址，地址相对路径为：`/api/v1/message/`。
+- 通过微信/Telegram/Slack/SynologyChat远程管理，其中微信/Telegram将会自动添加操作菜单（微信菜单条数有限制，部分菜单不显示）；微信需要在官方页面设置回调地址，SynologyChat需要设置机器人传入地址，地址相对路径为：`/api/v1/message/`。
 - 设置媒体服务器Webhook，通过MoviePilot发送播放通知等。Webhook回调相对路径为`/api/v1/webhook?token=moviepilot`（`3001`端口），其中`moviepilot`为设置的`API_TOKEN`。
-- 将MoviePilot做为Radarr或Sonarr服务器添加到Overseerr或Jellyseerr（`3001`端口），可使用Overseerr/Jellyseerr浏览订阅。
+- 将MoviePilot做为Radarr或Sonarr服务器添加到Overseerr或Jellyseerr（`API服务端口`），可使用Overseerr/Jellyseerr浏览订阅。
 - 映射宿主机docker.sock文件到容器`/var/run/docker.sock`，以支持内建重启操作。实例：`-v /var/run/docker.sock:/var/run/docker.sock:ro`
 
 **注意**

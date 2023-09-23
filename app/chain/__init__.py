@@ -223,44 +223,45 @@ class ChainBase(metaclass=ABCMeta):
 
     def filter_torrents(self, rule_string: str,
                         torrent_list: List[TorrentInfo],
-                        season_episodes: Dict[int, list] = None) -> List[TorrentInfo]:
+                        season_episodes: Dict[int, list] = None,
+                        mediainfo: MediaInfo = None) -> List[TorrentInfo]:
         """
         过滤种子资源
         :param rule_string:  过滤规则
         :param torrent_list:  资源列表
         :param season_episodes:  季集数过滤 {season:[episodes]}
+        :param mediainfo:  识别的媒体信息
         :return: 过滤后的资源列表，添加资源优先级
         """
         return self.run_module("filter_torrents", rule_string=rule_string,
-                               torrent_list=torrent_list, season_episodes=season_episodes)
+                               torrent_list=torrent_list, season_episodes=season_episodes,
+                               mediainfo=mediainfo)
 
-    def download(self, torrent_path: Path, download_dir: Path, cookie: str,
+    def download(self, content: Union[Path, str], download_dir: Path, cookie: str,
                  episodes: Set[int] = None, category: str = None
                  ) -> Optional[Tuple[Optional[str], str]]:
         """
         根据种子文件，选择并添加下载任务
-        :param torrent_path:  种子文件地址
+        :param content:  种子文件地址或者磁力链接
         :param download_dir:  下载目录
         :param cookie:  cookie
         :param episodes:  需要下载的集数
         :param category:  种子分类
         :return: 种子Hash，错误信息
         """
-        return self.run_module("download", torrent_path=torrent_path, download_dir=download_dir,
+        return self.run_module("download", content=content, download_dir=download_dir,
                                cookie=cookie, episodes=episodes, category=category)
 
-    def download_added(self, context: Context, torrent_path: Path, download_dir: Path) -> None:
+    def download_added(self, context: Context, download_dir: Path, torrent_path: Path = None) -> None:
         """
         添加下载任务成功后，从站点下载字幕，保存到下载目录
         :param context:  上下文，包括识别信息、媒体信息、种子信息
-        :param torrent_path:  种子文件地址
         :param download_dir:  下载目录
+        :param torrent_path:  种子文件地址
         :return: None，该方法可被多个模块同时处理
         """
-        if settings.DOWNLOAD_SUBTITLE:
-            return self.run_module("download_added", context=context, torrent_path=torrent_path,
-                                   download_dir=download_dir)
-        return None
+        return self.run_module("download_added", context=context, torrent_path=torrent_path,
+                               download_dir=download_dir)
 
     def list_torrents(self, status: TorrentStatus = None,
                       hashs: Union[list, str] = None) -> Optional[List[Union[TransferTorrent, DownloadingTorrent]]]:
@@ -335,16 +336,14 @@ class ChainBase(metaclass=ABCMeta):
         """
         return self.run_module("media_exists", mediainfo=mediainfo, itemid=itemid)
 
-    def refresh_mediaserver(self, mediainfo: MediaInfo, file_path: Path) -> Optional[bool]:
+    def refresh_mediaserver(self, mediainfo: MediaInfo, file_path: Path) -> None:
         """
         刷新媒体库
         :param mediainfo:  识别的媒体信息
         :param file_path:  文件路径
         :return: 成功或失败
         """
-        if settings.REFRESH_MEDIASERVER:
-            return self.run_module("refresh_mediaserver", mediainfo=mediainfo, file_path=file_path)
-        return None
+        self.run_module("refresh_mediaserver", mediainfo=mediainfo, file_path=file_path)
 
     def post_message(self, message: Notification) -> None:
         """
@@ -392,24 +391,22 @@ class ChainBase(metaclass=ABCMeta):
         :param mediainfo:  识别的媒体信息
         :return: 成功或失败
         """
-        if settings.SCRAP_METADATA:
-            return self.run_module("scrape_metadata", path=path, mediainfo=mediainfo)
-        return None
+        self.run_module("scrape_metadata", path=path, mediainfo=mediainfo)
 
     def register_commands(self, commands: Dict[str, dict]) -> None:
         """
         注册菜单命令
         """
-        return self.run_module("register_commands", commands=commands)
+        self.run_module("register_commands", commands=commands)
 
     def scheduler_job(self) -> None:
         """
         定时任务，每10分钟调用一次，模块实现该接口以实现定时服务
         """
-        return self.run_module("scheduler_job")
+        self.run_module("scheduler_job")
 
     def clear_cache(self) -> None:
         """
         清理缓存，模块实现该接口响应清理缓存事件
         """
-        return self.run_module("clear_cache")
+        self.run_module("clear_cache")

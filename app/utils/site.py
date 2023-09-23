@@ -22,12 +22,39 @@ class SiteUtils:
                   ' or contains(@href, "mybonus") '
                   ' or contains(@onclick, "logout")'
                   ' or contains(@href, "usercp")]',
-                  '//form[contains(@action, "logout")]']
+                  '//form[contains(@action, "logout")]',
+                  '//div[@class="user-info-side"]',
+                  '//a[contains(@href, "/profile/detail/")]']
         for xpath in xpaths:
             if html.xpath(xpath):
                 return True
-        user_info_div = html.xpath('//div[@class="user-info-side"]')
-        if user_info_div:
-            return True
-
         return False
+
+    @classmethod
+    def is_checkin(cls, html_text: str) -> bool:
+        """
+        判断站点是否已经签到
+        :return True已签到 False未签到
+        """
+        html = etree.HTML(html_text)
+        if not html:
+            return False
+        # 站点签到支持的识别XPATH
+        xpaths = [
+            '//a[@id="signed"]',
+            '//a[contains(@href, "attendance")]',
+            '//a[contains(text(), "签到")]',
+            '//a/b[contains(text(), "签 到")]',
+            '//span[@id="sign_in"]/a',
+            '//a[contains(@href, "addbonus")]',
+            '//input[@class="dt_button"][contains(@value, "打卡")]',
+            '//a[contains(@href, "sign_in")]',
+            '//a[contains(@onclick, "do_signin")]',
+            '//a[@id="do-attendance"]',
+            '//shark-icon-button[@href="attendance.php"]'
+        ]
+        for xpath in xpaths:
+            if html.xpath(xpath):
+                return False
+
+        return True

@@ -1,3 +1,4 @@
+import os
 import re
 from datetime import datetime, timedelta
 from threading import Event
@@ -11,6 +12,9 @@ from ruamel.yaml import CommentedMap
 
 from app.core.config import settings
 from app.helper.sites import SitesHelper
+
+from app.core.event import eventmanager
+from app.db.models.site import Site
 from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.modules.qbittorrent import Qbittorrent
@@ -18,6 +22,7 @@ from app.modules.transmission import Transmission
 from app.plugins import _PluginBase
 from app.plugins.iyuuautoseed.iyuu_helper import IyuuHelper
 from app.schemas import NotificationType
+from app.schemas.types import EventType
 from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
 
@@ -60,6 +65,7 @@ class IYUUAutoSeed(_PluginBase):
     _sites = []
     _notify = False
     _nolabels = None
+    _nopaths = None
     _clearcache = False
     # 退出事件
     _event = Event()
@@ -98,13 +104,19 @@ class IYUUAutoSeed(_PluginBase):
             self._cron = config.get("cron")
             self._token = config.get("token")
             self._downloaders = config.get("downloaders")
-            self._sites = config.get("sites")
+            self._sites = config.get("sites") or []
             self._notify = config.get("notify")
             self._nolabels = config.get("nolabels")
+            self._nopaths = config.get("nopaths")
             self._clearcache = config.get("clearcache")
             self._permanent_error_caches = config.get("permanent_error_caches") or []
             self._error_caches = [] if self._clearcache else config.get("error_caches") or []
             self._success_caches = [] if self._clearcache else config.get("success_caches") or []
+
+            # 过滤掉已删除的站点
+            self._sites = [site.get("id") for site in self.sites.get_indexers() if
+                           not site.get("public") and site.get("id") in self._sites]
+            self.__update_config()
 
         # 停止现有任务
         self.stop_service()
@@ -163,8 +175,8 @@ class IYUUAutoSeed(_PluginBase):
         拼装插件配置页面，需要返回两块数据：1、页面配置；2、数据结构
         """
         # 站点的可选项
-        site_options = [{"title": site.get("name"), "value": site.get("id")}
-                        for site in self.sites.get_indexers()]
+        site_options = [{"title": site.name, "value": site.id}
+                        for site in Site.list_order_by_pri(self.db)]
         return [
             {
                 'component': 'VForm',
@@ -242,22 +254,6 @@ class IYUUAutoSeed(_PluginBase):
                                     }
                                 ]
                             },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextField',
-                                        'props': {
-                                            'model': 'nolabels',
-                                            'label': '不辅种标签',
-                                            'placeholder': '使用,分隔多个标签'
-                                        }
-                                    }
-                                ]
-                            }
                         ]
                     },
                     {
@@ -315,6 +311,44 @@ class IYUUAutoSeed(_PluginBase):
                             {
                                 'component': 'VCol',
                                 'props': {
+                                    'cols': 12
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VTextField',
+                                        'props': {
+                                            'model': 'nolabels',
+                                            'label': '不辅种标签',
+                                            'placeholder': '使用,分隔多个标签'
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VTextarea',
+                                        'props': {
+                                            'model': 'nopaths',
+                                            'label': '不辅种数据文件目录',
+                                            'rows': 3,
+                                            'placeholder': '每一行一个目录'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {
                                     'cols': 12,
                                     'md': 6
                                 },
@@ -357,6 +391,7 @@ class IYUUAutoSeed(_PluginBase):
             "token": "",
             "downloaders": [],
             "sites": [],
+            "nopaths": "",
             "nolabels": ""
         }
 
@@ -374,6 +409,7 @@ class IYUUAutoSeed(_PluginBase):
             "sites": self._sites,
             "notify": self._notify,
             "nolabels": self._nolabels,
+            "nopaths": self._nopaths,
             "success_caches": self._success_caches,
             "error_caches": self._error_caches,
             "permanent_error_caches": self._permanent_error_caches
@@ -397,10 +433,6 @@ class IYUUAutoSeed(_PluginBase):
         if not self.iyuuhelper:
             return
         logger.info("开始辅种任务 ...")
-
-        # 排除已删除站点
-        self._sites = [site.get("id") for site in self.sites.get_indexers() if
-                       site.get("id") in self._sites]
 
         # 计数器初始化
         self.total = 0
@@ -431,13 +463,25 @@ class IYUUAutoSeed(_PluginBase):
                     logger.info(f"种子 {hash_str} 辅种失败且已缓存，跳过 ...")
                     continue
                 save_path = self.__get_save_path(torrent, downloader)
+
+                if self._nopaths and save_path:
+                    # 过滤不需要转移的路径
+                    nopath_skip = False
+                    for nopath in self._nopaths.split('\n'):
+                        if os.path.normpath(save_path).startswith(os.path.normpath(nopath)):
+                            logger.info(f"种子 {hash_str} 保存路径 {save_path} 不需要辅种，跳过 ...")
+                            nopath_skip = True
+                            break
+                    if nopath_skip:
+                        continue
+
                 # 获取种子标签
                 torrent_labels = self.__get_label(torrent, downloader)
                 if torrent_labels and self._nolabels:
                     is_skip = False
                     for label in self._nolabels.split(','):
                         if label in torrent_labels:
-                            logger.info(f"种子 {hash_str} 含有不转移标签 {label}，跳过 ...")
+                            logger.info(f"种子 {hash_str} 含有不辅种标签 {label}，跳过 ...")
                             is_skip = True
                             break
                     if is_skip:
@@ -676,6 +720,15 @@ class IYUUAutoSeed(_PluginBase):
                     "info_hash": "a444850638e7a6f6220e2efdde94099c53358159"
                 }
         """
+
+        def __is_special_site(url):
+            """
+            判断是否为特殊站点（是否需要添加https）
+            """
+            if "hdsky.me" in url:
+                return False
+            return True
+
         self.total += 1
         # 获取种子站点及下载地址模板
         site_url, download_page = self.iyuuhelper.get_torrent_url(seed.get("sid"))
@@ -720,10 +773,11 @@ class IYUUAutoSeed(_PluginBase):
             self.cached += 1
             return False
         # 强制使用Https
-        if "?" in torrent_url:
-            torrent_url += "&https=1"
-        else:
-            torrent_url += "?https=1"
+        if __is_special_site(torrent_url):
+            if "?" in torrent_url:
+                torrent_url += "&https=1"
+            else:
+                torrent_url += "?https=1"
         # 下载种子文件
         _, content, _, _, error_msg = self.torrent.download_torrent(
             url=torrent_url,
@@ -875,6 +929,9 @@ class IYUUAutoSeed(_PluginBase):
         """
         从详情页面获取下载链接
         """
+        if not site.get('url'):
+            logger.warn(f"站点 {site.get('name')} 未获取站点地址，无法获取种子下载链接")
+            return None
         try:
             page_url = f"{site.get('url')}details.php?id={seed.get('torrent_id')}&hit=1"
             logger.info(f"正在获取种子下载链接：{page_url} ...")
@@ -927,3 +984,31 @@ class IYUUAutoSeed(_PluginBase):
                 self._scheduler = None
         except Exception as e:
             print(str(e))
+
+    @eventmanager.register(EventType.SiteDeleted)
+    def site_deleted(self, event):
+        """
+        删除对应站点选中
+        """
+        site_id = event.event_data.get("site_id")
+        config = self.get_config()
+        if config:
+            sites = config.get("sites")
+            if sites:
+                if isinstance(sites, str):
+                    sites = [sites]
+
+                # 删除对应站点
+                if site_id:
+                    sites = [site for site in sites if int(site) != int(site_id)]
+                else:
+                    # 清空
+                    sites = []
+
+                # 若无站点，则停止
+                if len(sites) == 0:
+                    self._enabled = False
+
+                self._sites = sites
+                # 保存配置
+                self.__update_config()
