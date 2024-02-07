@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.context import MediaInfo, Context
 from app.core.metainfo import MetaInfo
 from app.log import logger
+from app.utils.common import retry
 from app.utils.http import RequestUtils
 from app.utils.singleton import Singleton
 from app.utils.string import StringUtils
@@ -54,7 +55,7 @@ class Telegram(metaclass=Singleton):
                 try:
                     _bot.infinity_polling(long_polling_timeout=30, logger_level=None)
                 except Exception as err:
-                    logger.error(f"Telegram消息接收服务异常：{err}")
+                    logger.error(f"Telegram消息接收服务异常：{str(err)}")
 
             # 启动线程来运行 infinity_polling
             self._polling_thread = threading.Thread(target=run_polling)
@@ -158,10 +159,8 @@ class Telegram(metaclass=Singleton):
                 title = re.sub(r"\s+", " ", title).strip()
                 free = torrent.volume_factor
                 seeder = f"{torrent.seeders}↑"
-                description = torrent.description
                 caption = f"{caption}\n{index}.【{site_name}】[{title}]({link}) " \
-                          f"{StringUtils.str_filesize(torrent.size)} {free} {seeder}\n" \
-                          f"_{description}_"
+                          f"{StringUtils.str_filesize(torrent.size)} {free} {seeder}"
                 index += 1
 
             if userid:
@@ -176,6 +175,7 @@ class Telegram(metaclass=Singleton):
             logger.error(f"发送消息失败：{msg_e}")
             return False
 
+    @retry(Exception, logger=logger)
     def __send_request(self, userid: str = None, image="", caption="") -> bool:
         """
         向Telegram发送报文
@@ -183,7 +183,9 @@ class Telegram(metaclass=Singleton):
 
         if image:
             req = RequestUtils(proxies=settings.PROXY).get_res(image)
-            if req and req.content:
+            if req is None:
+                raise Exception("获取图片失败")
+            if req.content:
                 image_file = Path(settings.TEMP_PATH) / Path(image).name
                 image_file.write_bytes(req.content)
                 photo = InputFile(image_file)
@@ -191,12 +193,23 @@ class Telegram(metaclass=Singleton):
                                            photo=photo,
                                            caption=caption,
                                            parse_mode="Markdown")
+                if ret is None:
+                    raise Exception("发送图片消息失败")
                 if ret:
                     return True
-        ret = self._bot.send_message(chat_id=userid or self._telegram_chat_id,
-                                     text=caption,
-                                     parse_mode="Markdown")
-
+        # 按4096分段循环发送消息
+        ret = None
+        if len(caption) > 4095:
+            for i in range(0, len(caption), 4095):
+                ret = self._bot.send_message(chat_id=userid or self._telegram_chat_id,
+                                             text=caption[i:i + 4095],
+                                             parse_mode="Markdown")
+        else:
+            ret = self._bot.send_message(chat_id=userid or self._telegram_chat_id,
+                                         text=caption,
+                                         parse_mode="Markdown")
+        if ret is None:
+            raise Exception("发送文本消息失败")
         return True if ret else False
 
     def register_commands(self, commands: Dict[str, dict]):

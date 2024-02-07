@@ -4,14 +4,15 @@ from typing import Dict, List, Union
 from cachetools import cached, TTLCache
 
 from app.chain import ChainBase
+from app.chain.media import MediaChain
 from app.core.config import settings
 from app.core.context import TorrentInfo, Context, MediaInfo
 from app.core.metainfo import MetaInfo
-from app.db import SessionFactory
 from app.db.site_oper import SiteOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.rss import RssHelper
 from app.helper.sites import SitesHelper
+from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import Notification
 from app.schemas.types import SystemConfigKey, MessageChannel, NotificationType
@@ -28,12 +29,13 @@ class TorrentsChain(ChainBase, metaclass=Singleton):
     _rss_file = "__rss_cache__"
 
     def __init__(self):
-        self._db = SessionFactory()
-        super().__init__(self._db)
+        super().__init__()
         self.siteshelper = SitesHelper()
-        self.siteoper = SiteOper(self._db)
+        self.siteoper = SiteOper()
         self.rsshelper = RssHelper()
         self.systemconfig = SystemConfigOper()
+        self.mediachain = MediaChain()
+        self.torrenthelper = TorrentHelper()
 
     def remote_refresh(self, channel: MessageChannel, userid: Union[str, int] = None):
         """
@@ -60,7 +62,16 @@ class TorrentsChain(ChainBase, metaclass=Singleton):
         else:
             return self.load_cache(self._rss_file) or {}
 
-    @cached(cache=TTLCache(maxsize=128 if settings.BIG_MEMORY_MODE else 1, ttl=600))
+    def clear_torrents(self):
+        """
+        清理种子缓存数据
+        """
+        logger.info(f'开始清理种子缓存数据 ...')
+        self.remove_cache(self._spider_file)
+        self.remove_cache(self._rss_file)
+        logger.info(f'种子缓存数据清理完成')
+
+    @cached(cache=TTLCache(maxsize=128, ttl=595))
     def browse(self, domain: str) -> List[TorrentInfo]:
         """
         浏览站点首页内容，返回种子清单，TTL缓存10分钟
@@ -73,7 +84,7 @@ class TorrentsChain(ChainBase, metaclass=Singleton):
             return []
         return self.refresh_torrents(site=site)
 
-    @cached(cache=TTLCache(maxsize=128 if settings.BIG_MEMORY_MODE else 1, ttl=300))
+    @cached(cache=TTLCache(maxsize=128, ttl=295))
     def rss(self, domain: str) -> List[TorrentInfo]:
         """
         获取站点RSS内容，返回种子清单，TTL缓存5分钟
@@ -134,6 +145,11 @@ class TorrentsChain(ChainBase, metaclass=Singleton):
         # 读取缓存
         torrents_cache = self.get_torrents()
 
+        # 缓存过滤掉无效种子
+        for _domain, _torrents in torrents_cache.items():
+            torrents_cache[_domain] = [_torrent for _torrent in _torrents
+                                       if not self.torrenthelper.is_invalid(_torrent.torrent_info.enclosure)]
+
         # 所有站点索引
         indexers = self.siteshelper.get_indexers()
         # 遍历站点缓存资源
@@ -168,7 +184,7 @@ class TorrentsChain(ChainBase, metaclass=Singleton):
                     # 识别
                     meta = MetaInfo(title=torrent.title, subtitle=torrent.description)
                     # 识别媒体信息
-                    mediainfo: MediaInfo = self.recognize_media(meta=meta)
+                    mediainfo: MediaInfo = self.mediachain.recognize_by_meta(meta)
                     if not mediainfo:
                         logger.warn(f'未识别到媒体信息，标题：{torrent.title}')
                         # 存储空的媒体信息

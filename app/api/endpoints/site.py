@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTasks
 
 from app import schemas
-from app.chain.cookiecloud import CookieCloudChain
 from app.chain.site import SiteChain
 from app.chain.torrents import TorrentsChain
 from app.core.event import EventManager
@@ -15,17 +14,11 @@ from app.db.models.site import Site
 from app.db.models.siteicon import SiteIcon
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.sites import SitesHelper
+from app.scheduler import Scheduler
 from app.schemas.types import SystemConfigKey, EventType
 from app.utils.string import StringUtils
 
 router = APIRouter()
-
-
-def start_cookiecloud_sync(db: Session):
-    """
-    后台启动CookieCloud站点同步
-    """
-    CookieCloudChain(db).process(manual=True)
 
 
 @router.get("/", summary="所有站点", response_model=List[schemas.Site])
@@ -38,7 +31,7 @@ def read_sites(db: Session = Depends(get_db),
 
 
 @router.post("/", summary="新增站点", response_model=schemas.Response)
-def update_site(
+def add_site(
         *,
         db: Session = Depends(get_db),
         site_in: schemas.Site,
@@ -52,7 +45,7 @@ def update_site(
     domain = StringUtils.get_url_domain(site_in.url)
     site_info = SitesHelper().get_indexer(domain)
     if not site_info:
-        return schemas.Response(success=False, message="该站点不支持")
+        return schemas.Response(success=False, message="该站点不支持或用户未通过认证")
     if Site.get_by_domain(db, domain):
         return schemas.Response(success=False, message=f"{domain} 站点己存在")
     # 保存站点信息
@@ -101,12 +94,11 @@ def delete_site(
 
 @router.get("/cookiecloud", summary="CookieCloud同步", response_model=schemas.Response)
 def cookie_cloud_sync(background_tasks: BackgroundTasks,
-                      db: Session = Depends(get_db),
                       _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     运行CookieCloud同步站点信息
     """
-    background_tasks.add_task(start_cookiecloud_sync, db)
+    background_tasks.add_task(Scheduler().start, job_id="cookiecloud")
     return schemas.Response(success=True, message="CookieCloud同步任务已启动！")
 
 
@@ -119,7 +111,8 @@ def cookie_cloud_sync(db: Session = Depends(get_db),
     Site.reset(db)
     SystemConfigOper().set(SystemConfigKey.IndexerSites, [])
     SystemConfigOper().set(SystemConfigKey.RssSites, [])
-    CookieCloudChain().process(manual=True)
+    # 启动定时服务
+    Scheduler().start("cookiecloud", manual=True)
     # 插件站点删除
     EventManager().send_event(EventType.SiteDeleted,
                               {
@@ -146,9 +139,9 @@ def update_cookie(
             detail=f"站点 {site_id} 不存在！",
         )
     # 更新Cookie
-    state, message = SiteChain(db).update_cookie(site_info=site_info,
-                                                 username=username,
-                                                 password=password)
+    state, message = SiteChain().update_cookie(site_info=site_info,
+                                               username=username,
+                                               password=password)
     return schemas.Response(success=state, message=message)
 
 
@@ -165,7 +158,7 @@ def test_site(site_id: int,
             status_code=404,
             detail=f"站点 {site_id} 不存在",
         )
-    status, message = SiteChain(db).test(site.domain)
+    status, message = SiteChain().test(site.domain)
     return schemas.Response(success=status, message=message)
 
 
@@ -235,10 +228,11 @@ def read_rss_sites(db: Session = Depends(get_db)) -> List[dict]:
     """
     # 选中的rss站点
     selected_sites = SystemConfigOper().get(SystemConfigKey.RssSites) or []
+
     # 所有站点
     all_site = Site.list_order_by_pri(db)
-    if not selected_sites or not all_site:
-        return []
+    if not selected_sites:
+        return all_site
 
     # 选中的rss站点
     rss_sites = [site for site in all_site if site and site.id in selected_sites]

@@ -1,4 +1,5 @@
 from queue import Queue, Empty
+from typing import Dict, Any
 
 from app.log import logger
 from app.utils.singleton import Singleton
@@ -10,16 +11,13 @@ class EventManager(metaclass=Singleton):
     事件管理器
     """
 
-    # 事件队列
-    _eventQueue: Queue = None
-    # 事件响应函数字典
-    _handlers: dict = {}
-
     def __init__(self):
         # 事件队列
         self._eventQueue = Queue()
         # 事件响应函数字典
-        self._handlers = {}
+        self._handlers: Dict[str, Dict[str, Any]] = {}
+        # 已禁用的事件响应
+        self._disabled_handlers = []
 
     def get_event(self):
         """
@@ -27,36 +25,52 @@ class EventManager(metaclass=Singleton):
         """
         try:
             event = self._eventQueue.get(block=True, timeout=1)
-            handlerList = self._handlers.get(event.event_type)
-            return event, handlerList or []
+            handlers = self._handlers.get(event.event_type) or {}
+            if handlers:
+                # 去除掉被禁用的事件响应
+                handlerList = [handler for handler in handlers.values()
+                               if handler.__qualname__.split(".")[0] not in self._disabled_handlers]
+                return event, handlerList
+            return event, []
         except Empty:
             return None, []
+
+    def check(self, etype: EventType):
+        """
+        检查事件是否存在响应
+        """
+        return etype.value in self._handlers
 
     def add_event_listener(self, etype: EventType, handler: type):
         """
         注册事件处理
         """
         try:
-            handlerList = self._handlers[etype.value]
+            handlers = self._handlers[etype.value]
         except KeyError:
-            handlerList = []
-            self._handlers[etype.value] = handlerList
-        if handler not in handlerList:
-            handlerList.append(handler)
-            logger.debug(f"Event Registed：{etype.value} - {handler}")
+            handlers = {}
+            self._handlers[etype.value] = handlers
+        if handler.__qualname__ in handlers:
+            handlers.pop(handler.__qualname__)
+        else:
+            logger.debug(f"Event Registed：{etype.value} - {handler.__qualname__}")
+        handlers[handler.__qualname__] = handler
 
-    def remove_event_listener(self, etype: EventType, handler: type):
+    def disable_events_hander(self, class_name: str):
         """
-        移除监听器的处理函数
+        标记对应类事件处理为不可用
         """
-        try:
-            handlerList = self._handlers[etype.value]
-            if handler in handlerList[:]:
-                handlerList.remove(handler)
-            if not handlerList:
-                del self._handlers[etype.value]
-        except KeyError:
-            pass
+        if class_name not in self._disabled_handlers:
+            self._disabled_handlers.append(class_name)
+            logger.debug(f"Event Disabled：{class_name}")
+
+    def enable_events_hander(self, class_name: str):
+        """
+        标记对应类事件处理为可用
+        """
+        if class_name in self._disabled_handlers:
+            self._disabled_handlers.remove(class_name)
+            logger.debug(f"Event Enabled：{class_name}")
 
     def send_event(self, etype: EventType, data: dict = None):
         """

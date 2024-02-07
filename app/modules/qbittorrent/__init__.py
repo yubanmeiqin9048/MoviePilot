@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Set, Tuple, Optional, Union, List
 
 from qbittorrentapi import TorrentFilesList
+from torrentool.torrent import Torrent
 
 from app import schemas
 from app.core.config import settings
@@ -34,7 +35,7 @@ class QbittorrentModule(_ModuleBase):
         """
         # 定时重连
         if self.qbittorrent.is_inactive():
-            self.qbittorrent = Qbittorrent()
+            self.qbittorrent.reconnect()
 
     def download(self, content: Union[Path, str], download_dir: Path, cookie: str,
                  episodes: Set[int] = None, category: str = None) -> Optional[Tuple[Optional[str], str]]:
@@ -47,6 +48,21 @@ class QbittorrentModule(_ModuleBase):
         :param category:  分类
         :return: 种子Hash，错误信息
         """
+
+        def __get_torrent_info() -> Tuple[str, int]:
+            """
+            获取种子名称
+            """
+            try:
+                if isinstance(content, Path):
+                    torrentinfo = Torrent.from_file(content)
+                else:
+                    torrentinfo = Torrent.from_string(content)
+                return torrentinfo.name, torrentinfo.total_size
+            except Exception as e:
+                logger.error(f"获取种子名称失败：{e}")
+                return "", 0
+
         if not content:
             return
         if isinstance(content, Path) and not content.exists():
@@ -70,6 +86,28 @@ class QbittorrentModule(_ModuleBase):
             category=category
         )
         if not state:
+            # 读取种子的名称
+            torrent_name, torrent_size = __get_torrent_info()
+            if not torrent_name:
+                return None, f"添加种子任务失败：无法读取种子文件"
+            # 查询所有下载器的种子
+            torrents, error = self.qbittorrent.get_torrents()
+            if error:
+                return None, "无法连接qbittorrent下载器"
+            if torrents:
+                for torrent in torrents:
+                    # 名称与大小相等则认为是同一个种子
+                    if torrent.get("name") == torrent_name and torrent.get("total_size") == torrent_size:
+                        torrent_hash = torrent.get("hash")
+                        torrent_tags = [str(tag).strip() for tag in torrent.get("tags").split(',')]
+                        logger.warn(f"下载器中已存在该种子任务：{torrent_hash} - {torrent.get('name')}")
+                        # 给种子打上标签
+                        if "已整理" in torrent_tags:
+                            self.qbittorrent.remove_torrents_tag(ids=torrent_hash, tag=['已整理'])
+                        if settings.TORRENT_TAG and settings.TORRENT_TAG not in torrent_tags:
+                            logger.info(f"给种子 {torrent_hash} 打上标签：{settings.TORRENT_TAG}")
+                            self.qbittorrent.set_torrents_tag(ids=torrent_hash, tags=[settings.TORRENT_TAG])
+                        return torrent_hash, f"下载任务已存在"
             return None, f"添加种子任务失败：{content}"
         else:
             # 获取种子Hash
@@ -101,9 +139,15 @@ class QbittorrentModule(_ModuleBase):
                         # 选择文件
                         self.qbittorrent.set_files(torrent_hash=torrent_hash, file_ids=file_ids, priority=0)
                     # 开始任务
-                    self.qbittorrent.start_torrents(torrent_hash)
+                    if settings.QB_FORCE_RESUME:
+                        # 强制继续
+                        self.qbittorrent.torrents_set_force_start(torrent_hash)
+                    else:
+                        self.qbittorrent.start_torrents(torrent_hash)
                     return torrent_hash, f"添加下载成功，已选择集数：{sucess_epidised}"
                 else:
+                    if settings.QB_FORCE_RESUME:
+                        self.qbittorrent.torrents_set_force_start(torrent_hash)
                     return torrent_hash, "添加下载成功"
 
     def list_torrents(self, status: TorrentStatus = None,
@@ -123,7 +167,7 @@ class QbittorrentModule(_ModuleBase):
                 if content_path:
                     torrent_path = Path(content_path)
                 else:
-                    torrent_path = Path(settings.DOWNLOAD_PATH) / torrent.get('name')
+                    torrent_path = settings.SAVE_PATH / torrent.get('name')
                 ret_torrents.append(TransferTorrent(
                     title=torrent.get('name'),
                     path=torrent_path,
@@ -142,7 +186,7 @@ class QbittorrentModule(_ModuleBase):
                 if content_path:
                     torrent_path = Path(content_path)
                 else:
-                    torrent_path = Path(settings.DOWNLOAD_PATH) / torrent.get('name')
+                    torrent_path = settings.SAVE_PATH / torrent.get('name')
                 ret_torrents.append(TransferTorrent(
                     title=torrent.get('name'),
                     path=torrent_path,
@@ -162,9 +206,12 @@ class QbittorrentModule(_ModuleBase):
                     season_episode=meta.season_episode,
                     progress=torrent.get('progress') * 100,
                     size=torrent.get('total_size'),
-                    state="paused" if torrent.get('state') == "paused" else "downloading",
+                    state="paused" if torrent.get('state') in ("paused", "pausedDL") else "downloading",
                     dlspeed=StringUtils.str_filesize(torrent.get('dlspeed')),
                     upspeed=StringUtils.str_filesize(torrent.get('upspeed')),
+                    left_time=StringUtils.str_secends(
+                        (torrent.get('total_size') - torrent.get('completed')) / torrent.get('dlspeed')) if torrent.get(
+                        'dlspeed') > 0 else ''
                 ))
         else:
             return None
@@ -211,7 +258,7 @@ class QbittorrentModule(_ModuleBase):
         :param hashs:  种子Hash
         :return: bool
         """
-        return self.qbittorrent.start_torrents(ids=hashs)
+        return self.qbittorrent.stop_torrents(ids=hashs)
 
     def torrent_files(self, tid: str) -> Optional[TorrentFilesList]:
         """
@@ -225,6 +272,8 @@ class QbittorrentModule(_ModuleBase):
         """
         # 调用Qbittorrent API查询实时信息
         info = self.qbittorrent.transfer_info()
+        if not info:
+            return schemas.DownloaderInfo()
         return schemas.DownloaderInfo(
             download_speed=info.get("dl_info_speed"),
             upload_speed=info.get("up_info_speed"),

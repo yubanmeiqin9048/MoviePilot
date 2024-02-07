@@ -1,9 +1,8 @@
 import base64
-from typing import Tuple, Optional, Union
+from typing import Tuple, Optional
 from urllib.parse import urljoin
 
 from lxml import etree
-from sqlalchemy.orm import Session
 
 from app.chain import ChainBase
 from app.chain.site import SiteChain
@@ -16,7 +15,6 @@ from app.helper.message import MessageHelper
 from app.helper.rss import RssHelper
 from app.helper.sites import SitesHelper
 from app.log import logger
-from app.schemas import Notification, NotificationType, MessageChannel
 from app.utils.http import RequestUtils
 from app.utils.site import SiteUtils
 
@@ -26,34 +24,19 @@ class CookieCloudChain(ChainBase):
     CookieCloud处理链
     """
 
-    def __init__(self, db: Session = None):
-        super().__init__(db)
-        self.siteoper = SiteOper(self._db)
-        self.siteiconoper = SiteIconOper(self._db)
+    def __init__(self):
+        super().__init__()
+        self.siteoper = SiteOper()
+        self.siteiconoper = SiteIconOper()
         self.siteshelper = SitesHelper()
         self.rsshelper = RssHelper()
-        self.sitechain = SiteChain(self._db)
+        self.sitechain = SiteChain()
         self.message = MessageHelper()
         self.cookiecloud = CookieCloudHelper(
             server=settings.COOKIECLOUD_HOST,
             key=settings.COOKIECLOUD_KEY,
             password=settings.COOKIECLOUD_PASSWORD
         )
-
-    def remote_sync(self, channel: MessageChannel, userid: Union[int, str]):
-        """
-        远程触发同步站点，发送消息
-        """
-        self.post_message(Notification(channel=channel, mtype=NotificationType.SiteMessage,
-                                       title="开始同步CookieCloud站点 ...", userid=userid))
-        # 开始同步
-        success, msg = self.process()
-        if success:
-            self.post_message(Notification(channel=channel, mtype=NotificationType.SiteMessage,
-                                           title=f"同步站点成功，{msg}", userid=userid))
-        else:
-            self.post_message(Notification(channel=channel, mtype=NotificationType.SiteMessage,
-                                           title=f"同步站点失败：{msg}", userid=userid))
 
     def process(self, manual=False) -> Tuple[bool, str]:
         """

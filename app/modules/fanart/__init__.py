@@ -326,13 +326,21 @@ class FanartModule(_ModuleBase):
         :param mediainfo:  识别的媒体信息
         :return: 更新后的媒体信息
         """
+        if not settings.FANART_ENABLE:
+            return None
+        if not mediainfo.tmdb_id and not mediainfo.tvdb_id:
+            return None
         if mediainfo.type == MediaType.MOVIE:
             result = self.__request_fanart(mediainfo.type, mediainfo.tmdb_id)
         else:
-            result = self.__request_fanart(mediainfo.type, mediainfo.tvdb_id)
+            if mediainfo.tvdb_id:
+                result = self.__request_fanart(mediainfo.type, mediainfo.tvdb_id)
+            else:
+                logger.info(f"{mediainfo.title_year} 没有tvdbid，无法获取fanart图片")
+                return None
         if not result or result.get('status') == 'error':
-            logger.warn(f"没有获取到 {mediainfo.title_year} 的Fanart图片数据")
-            return
+            logger.warn(f"没有获取到 {mediainfo.title_year} 的fanart图片数据")
+            return None
         # 获取所有图片
         for name, images in result.items():
             if not images:
@@ -351,6 +359,7 @@ class FanartModule(_ModuleBase):
                 # 季图片格式 seasonxx-poster
                 image_name = f"season{str(image_season).rjust(2, '0')}-{image_name[6:]}"
             if not mediainfo.get_image(image_name):
+                # 没有图片才设置
                 mediainfo.set_image(image_name, image_obj.get('url'))
 
         return mediainfo
@@ -377,5 +386,5 @@ class FanartModule(_ModuleBase):
             if ret:
                 return ret.json()
         except Exception as err:
-            logger.error(f"获取{queryid}的Fanart图片失败：{err}")
+            logger.error(f"获取{queryid}的Fanart图片失败：{str(err)}")
         return None

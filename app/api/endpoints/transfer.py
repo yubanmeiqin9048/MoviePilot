@@ -8,13 +8,15 @@ from app import schemas
 from app.chain.transfer import TransferChain
 from app.core.security import verify_token
 from app.db import get_db
+from app.db.models.transferhistory import TransferHistory
 from app.schemas import MediaType
 
 router = APIRouter()
 
 
 @router.post("/manual", summary="手动转移", response_model=schemas.Response)
-def manual_transfer(path: str,
+def manual_transfer(path: str = None,
+                    logid: int = None,
                     target: str = None,
                     tmdbid: int = None,
                     type_name: str = None,
@@ -28,8 +30,9 @@ def manual_transfer(path: str,
                     db: Session = Depends(get_db),
                     _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
-    手动转移，支持自定义剧集识别格式
+    手动转移，文件或历史记录，支持自定义剧集识别格式
     :param path: 转移路径或文件
+    :param logid: 转移历史记录ID
     :param target: 目标路径
     :param type_name: 媒体类型、电影/电视剧
     :param tmdbid: tmdbid
@@ -43,11 +46,31 @@ def manual_transfer(path: str,
     :param db: 数据库
     :param _: Token校验
     """
-    in_path = Path(path)
-    if target:
-        target = Path(target)
-        if not target.exists():
-            return schemas.Response(success=False, message=f"目标路径不存在")
+    force = False
+    target = Path(target) if target else None
+    transfer = TransferChain()
+    if logid:
+        # 查询历史记录
+        history: TransferHistory = TransferHistory.get(db, logid)
+        if not history:
+            return schemas.Response(success=False, message=f"历史记录不存在，ID：{logid}")
+        # 强制转移
+        force = True
+        # 源路径
+        in_path = Path(history.src)
+        # 目的路径
+        if history.dest and str(history.dest) != "None":
+            # 删除旧的已整理文件
+            transfer.delete_files(Path(history.dest))
+            if not target:
+                target = transfer.get_root_path(path=history.dest,
+                                                type_name=history.type,
+                                                category=history.category)
+    elif path:
+        in_path = Path(path)
+    else:
+        return schemas.Response(success=False, message=f"缺少参数：path/logid")
+
     # 类型
     mtype = MediaType(type_name) if type_name else None
     # 自定义格式
@@ -60,7 +83,7 @@ def manual_transfer(path: str,
             offset=episode_offset,
         )
     # 开始转移
-    state, errormsg = TransferChain(db).manual_transfer(
+    state, errormsg = transfer.manual_transfer(
         in_path=in_path,
         target=target,
         tmdbid=tmdbid,
@@ -68,7 +91,8 @@ def manual_transfer(path: str,
         season=season,
         transfer_type=transfer_type,
         epformat=epformat,
-        min_filesize=min_filesize
+        min_filesize=min_filesize,
+        force=force
     )
     # 失败
     if not state:

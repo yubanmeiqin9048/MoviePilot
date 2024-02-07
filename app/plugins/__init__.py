@@ -5,8 +5,6 @@ from typing import Any, List, Dict, Tuple
 from app.chain import ChainBase
 from app.core.config import settings
 from app.core.event import EventManager
-from app.db import SessionFactory
-from app.db.models import Base
 from app.db.plugindata_oper import PluginDataOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.message import MessageHelper
@@ -36,12 +34,10 @@ class _PluginBase(metaclass=ABCMeta):
     plugin_desc: str = ""
 
     def __init__(self):
-        # 数据库连接
-        self.db = SessionFactory()
         # 插件数据
-        self.plugindata = PluginDataOper(self.db)
+        self.plugindata = PluginDataOper()
         # 处理链
-        self.chain = PluginChian(self.db)
+        self.chain = PluginChian()
         # 系统配置
         self.systemconfig = SystemConfigOper()
         # 系统消息
@@ -61,7 +57,7 @@ class _PluginBase(metaclass=ABCMeta):
     @abstractmethod
     def get_command() -> List[Dict[str, Any]]:
         """
-        获取插件命令
+        注册插件远程命令
         [{
             "cmd": "/xx",
             "event": EventType.xx,
@@ -75,7 +71,7 @@ class _PluginBase(metaclass=ABCMeta):
     @abstractmethod
     def get_api(self) -> List[Dict[str, Any]]:
         """
-        获取插件API
+        注册插件API
         [{
             "path": "/xx",
             "endpoint": self.xxx,
@@ -86,10 +82,24 @@ class _PluginBase(metaclass=ABCMeta):
         """
         pass
 
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        [{
+            "id": "服务ID",
+            "name": "服务名称",
+            "trigger": "触发器：cron/interval/date/CronTrigger.from_crontab()",
+            "func": self.xxx,
+            "kwargs": {} # 定时器参数
+        }]
+        """
+        pass
+
     @abstractmethod
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
         拼装插件配置页面，需要返回两块数据：1、页面配置；2、数据结构
+        插件配置页面使用Vuetify组件拼装，参考：https://vuetifyjs.com/
         """
         pass
 
@@ -97,6 +107,7 @@ class _PluginBase(metaclass=ABCMeta):
     def get_page(self) -> List[dict]:
         """
         拼装插件详情页面，需要返回页面配置，同时附带数据
+        插件详情页面使用Vuetify组件拼装，参考：https://vuetifyjs.com/
         """
         pass
 
@@ -144,7 +155,7 @@ class _PluginBase(metaclass=ABCMeta):
             data_path.mkdir(parents=True)
         return data_path
 
-    def save_data(self, key: str, value: Any, plugin_id: str = None) -> Base:
+    def save_data(self, key: str, value: Any, plugin_id: str = None):
         """
         保存插件数据
         :param key: 数据key
@@ -153,7 +164,7 @@ class _PluginBase(metaclass=ABCMeta):
         """
         if not plugin_id:
             plugin_id = self.__class__.__name__
-        return self.plugindata.save(plugin_id, key, value)
+        self.plugindata.save(plugin_id, key, value)
 
     def get_data(self, key: str, plugin_id: str = None) -> Any:
         """
@@ -186,8 +197,4 @@ class _PluginBase(metaclass=ABCMeta):
         ))
 
     def close(self):
-        """
-        关闭数据库连接
-        """
-        if self.db:
-            self.db.close()
+        pass

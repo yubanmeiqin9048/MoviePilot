@@ -2,10 +2,8 @@ import pickle
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Tuple
 from typing import List, Optional
-
-from sqlalchemy.orm import Session
 
 from app.chain import ChainBase
 from app.core.context import Context
@@ -26,21 +24,23 @@ class SearchChain(ChainBase):
     站点资源搜索处理链
     """
 
-    def __init__(self, db: Session = None):
-        super().__init__(db)
+    def __init__(self):
+        super().__init__()
         self.siteshelper = SitesHelper()
         self.progress = ProgressHelper()
         self.systemconfig = SystemConfigOper()
         self.torrenthelper = TorrentHelper()
 
-    def search_by_tmdbid(self, tmdbid: int, mtype: MediaType = None, area: str = "title") -> List[Context]:
+    def search_by_id(self, tmdbid: int = None, doubanid: str = None,
+                     mtype: MediaType = None, area: str = "title") -> List[Context]:
         """
-        根据TMDB ID搜索资源，精确匹配，但不不过滤本地存在的资源
+        根据TMDBID/豆瓣ID搜索资源，精确匹配，但不不过滤本地存在的资源
         :param tmdbid: TMDB ID
+        :param doubanid: 豆瓣 ID
         :param mtype: 媒体，电影 or 电视剧
         :param area: 搜索范围，title or imdbid
         """
-        mediainfo = self.recognize_media(tmdbid=tmdbid, mtype=mtype)
+        mediainfo = self.recognize_media(tmdbid=tmdbid, doubanid=doubanid, mtype=mtype)
         if not mediainfo:
             logger.error(f'{tmdbid} 媒体信息识别失败！')
             return []
@@ -62,7 +62,7 @@ class SearchChain(ChainBase):
         else:
             logger.info(f'开始浏览资源，站点：{site} ...')
         # 搜索
-        return self.__search_all_sites(keyword=title, sites=[site] if site else None, page=page) or []
+        return self.__search_all_sites(keywords=[title], sites=[site] if site else None, page=page) or []
 
     def last_search_results(self) -> List[Context]:
         """
@@ -94,19 +94,29 @@ class SearchChain(ChainBase):
         :param filter_rule: 过滤规则，为空是使用默认过滤规则
         :param area: 搜索范围，title or imdbid
         """
+        # 豆瓣标题处理
+        if not mediainfo.tmdb_id:
+            meta = MetaInfo(title=mediainfo.title)
+            mediainfo.title = meta.name
+            mediainfo.season = meta.begin_season
         logger.info(f'开始搜索资源，关键词：{keyword or mediainfo.title} ...')
         # 补充媒体信息
         if not mediainfo.names:
             mediainfo: MediaInfo = self.recognize_media(mtype=mediainfo.type,
-                                                        tmdbid=mediainfo.tmdb_id)
+                                                        tmdbid=mediainfo.tmdb_id,
+                                                        doubanid=mediainfo.douban_id)
             if not mediainfo:
                 logger.error(f'媒体信息识别失败！')
                 return []
         # 缺失的季集
-        if no_exists and no_exists.get(mediainfo.tmdb_id):
+        mediakey = mediainfo.tmdb_id or mediainfo.douban_id
+        if no_exists and no_exists.get(mediakey):
             # 过滤剧集
             season_episodes = {sea: info.episodes
                                for sea, info in no_exists[mediainfo.tmdb_id].items()}
+        elif mediainfo.season:
+            # 豆瓣只搜索当前季
+            season_episodes = {mediainfo.season: []}
         else:
             season_episodes = None
         # 搜索关键词
@@ -117,16 +127,12 @@ class SearchChain(ChainBase):
         else:
             keywords = [mediainfo.title]
         # 执行搜索
-        torrents: List[TorrentInfo] = []
-        for keyword in keywords:
-            torrents = self.__search_all_sites(
-                mediainfo=mediainfo,
-                keyword=keyword,
-                sites=sites,
-                area=area
-            )
-            if torrents:
-                break
+        torrents: List[TorrentInfo] = self.__search_all_sites(
+            mediainfo=mediainfo,
+            keywords=keywords,
+            sites=sites,
+            area=area
+        )
         if not torrents:
             logger.warn(f'{keyword or mediainfo.title} 未搜索到资源')
             return []
@@ -145,8 +151,9 @@ class SearchChain(ChainBase):
             if not torrents:
                 logger.warn(f'{keyword or mediainfo.title} 没有符合优先级规则的资源')
                 return []
-        # 使用默认过滤规则再次过滤
+        # 使用过滤规则再次过滤
         torrents = self.filter_torrents_by_rule(torrents=torrents,
+                                                mediainfo=mediainfo,
                                                 filter_rule=filter_rule)
         if not torrents:
             logger.warn(f'{keyword or mediainfo.title} 没有符合过滤规则的资源')
@@ -160,6 +167,7 @@ class SearchChain(ChainBase):
         if mediainfo:
             self.progress.start(ProgressKey.Search)
             logger.info(f'开始匹配，总 {_total} 个资源 ...')
+            logger.info(f"标题：{mediainfo.title}，原标题：{mediainfo.original_title}，别名：{mediainfo.names}")
             self.progress.update(value=0, text=f'开始匹配，总 {_total} 个资源 ...', key=ProgressKey.Search)
             for torrent in torrents:
                 _count += 1
@@ -206,7 +214,7 @@ class SearchChain(ChainBase):
                     continue
                 # 在副标题中判断是否存在标题与原语种标题
                 if torrent.description:
-                    subtitle = torrent.description.split()
+                    subtitle = re.split(r'[\s/|]+', torrent.description)
                     if (StringUtils.is_chinese(mediainfo.title)
                         and str(mediainfo.title) in subtitle) \
                             or (StringUtils.is_chinese(mediainfo.original_title)
@@ -241,15 +249,15 @@ class SearchChain(ChainBase):
         # 返回
         return contexts
 
-    def __search_all_sites(self, mediainfo: Optional[MediaInfo] = None,
-                           keyword: str = None,
+    def __search_all_sites(self, keywords: List[str],
+                           mediainfo: Optional[MediaInfo] = None,
                            sites: List[int] = None,
                            page: int = 0,
                            area: str = "title") -> Optional[List[TorrentInfo]]:
         """
         多线程搜索多个站点
         :param mediainfo:  识别的媒体信息
-        :param keyword:  搜索关键词，如有按关键词搜索，否则按媒体信息名称搜索
+        :param keywords:  搜索关键词列表
         :param sites:  指定站点ID列表，如有则只搜索指定站点，否则搜索所有站点
         :param page:  搜索页码
         :param area:  搜索区域 title or imdbid
@@ -291,8 +299,18 @@ class SearchChain(ChainBase):
         executor = ThreadPoolExecutor(max_workers=len(indexer_sites))
         all_task = []
         for site in indexer_sites:
-            task = executor.submit(self.search_torrents, mediainfo=mediainfo,
-                                   site=site, keyword=keyword, page=page, area=area)
+            if area == "imdbid":
+                # 搜索IMDBID
+                task = executor.submit(self.search_torrents, site=site,
+                                       keywords=[mediainfo.imdb_id] if mediainfo else None,
+                                       mtype=mediainfo.type if mediainfo else None,
+                                       page=page)
+            else:
+                # 搜索标题
+                task = executor.submit(self.search_torrents, site=site,
+                                       keywords=keywords,
+                                       mtype=mediainfo.type if mediainfo else None,
+                                       page=page)
             all_task.append(task)
         # 结果集
         results = []
@@ -303,7 +321,7 @@ class SearchChain(ChainBase):
                 results.extend(result)
             logger.info(f"站点搜索进度：{finish_count} / {total_num}")
             self.progress.update(value=finish_count / total_num * 100,
-                                 text=f"正在搜索{keyword or ''}，已完成 {finish_count} / {total_num} 个站点 ...",
+                                 text=f"正在搜索{keywords or ''}，已完成 {finish_count} / {total_num} 个站点 ...",
                                  key=ProgressKey.Search)
         # 计算耗时
         end_time = datetime.now()
@@ -319,23 +337,51 @@ class SearchChain(ChainBase):
 
     def filter_torrents_by_rule(self,
                                 torrents: List[TorrentInfo],
-                                filter_rule: Dict[str, str] = None
+                                mediainfo: MediaInfo,
+                                filter_rule: Dict[str, str] = None,
                                 ) -> List[TorrentInfo]:
         """
         使用过滤规则过滤种子
         :param torrents: 种子列表
         :param filter_rule: 过滤规则
+        :param mediainfo: 媒体信息
         """
 
-        # 取默认过滤规则
         if not filter_rule:
-            filter_rule = self.systemconfig.get(SystemConfigKey.DefaultFilterRules)
+            # 没有则取搜索默认过滤规则
+            filter_rule = self.systemconfig.get(SystemConfigKey.DefaultSearchFilterRules)
         if not filter_rule:
             return torrents
         # 包含
         include = filter_rule.get("include")
         # 排除
         exclude = filter_rule.get("exclude")
+        # 质量
+        quality = filter_rule.get("quality")
+        # 分辨率
+        resolution = filter_rule.get("resolution")
+        # 特效
+        effect = filter_rule.get("effect")
+        # 电影大小
+        movie_size = filter_rule.get("movie_size")
+        # 剧集单集大小
+        tv_size = filter_rule.get("tv_size")
+
+        def __get_size_range(size_str: str) -> Tuple[float, float]:
+            """
+            获取大小范围
+            """
+            if not size_str:
+                return 0, 0
+            try:
+                size_range = size_str.split("-")
+                if len(size_range) == 1:
+                    return 0, float(size_range[0])
+                elif len(size_range) == 2:
+                    return float(size_range[0]), float(size_range[1])
+            except Exception as e:
+                print(str(e))
+            return 0, 0
 
         def __filter_torrent(t: TorrentInfo) -> bool:
             """
@@ -353,6 +399,54 @@ class SearchChain(ChainBase):
                              f"{t.title} {t.description}", re.I):
                     logger.info(f"{t.title} 匹配排除规则 {exclude}")
                     return False
+            # 质量
+            if quality:
+                if not re.search(r"%s" % quality, t.title, re.I):
+                    logger.info(f"{t.title} 不匹配质量规则 {quality}")
+                    return False
+
+            # 分辨率
+            if resolution:
+                if not re.search(r"%s" % resolution, t.title, re.I):
+                    logger.info(f"{t.title} 不匹配分辨率规则 {resolution}")
+                    return False
+
+            # 特效
+            if effect:
+                if not re.search(r"%s" % effect, t.title, re.I):
+                    logger.info(f"{t.title} 不匹配特效规则 {effect}")
+                    return False
+
+            # 大小
+            if movie_size or tv_size:
+                if mediainfo.type == MediaType.TV:
+                    size = tv_size
+                else:
+                    size = movie_size
+                # 大小范围
+                begin_size, end_size = __get_size_range(size)
+                if begin_size is not None and end_size is not None:
+                    meta = MetaInfo(title=t.title, subtitle=t.description)
+                    # 集数
+                    if mediainfo.type == MediaType.TV:
+                        # 电视剧
+                        season = meta.begin_season or 1
+                        if meta.total_episode:
+                            # 识别的总集数
+                            episodes_num = meta.total_episode
+                        else:
+                            # 整季集数
+                            episodes_num = len(mediainfo.seasons.get(season) or [1])
+                        # 比较大小
+                        if not (begin_size * 1024 ** 3 <= (t.size / episodes_num) <= end_size * 1024 ** 3):
+                            logger.info(f"{t.title} {StringUtils.str_filesize(t.size)} "
+                                        f"共{episodes_num}集，不匹配大小规则 {size}")
+                            return False
+                    else:
+                        # 电影比较大小
+                        if not (begin_size * 1024 ** 3 <= t.size <= end_size * 1024 ** 3):
+                            logger.info(f"{t.title} {StringUtils.str_filesize(t.size)} 不匹配大小规则 {size}")
+                            return False
             return True
 
         # 使用默认过滤规则再次过滤

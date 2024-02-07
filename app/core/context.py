@@ -1,11 +1,12 @@
 import re
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 from app.core.config import settings
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
 from app.schemas.types import MediaType
+from app.utils.string import StringUtils
 
 
 @dataclass
@@ -44,6 +45,8 @@ class TorrentInfo:
     pubdate: str = None
     # 已过时间
     date_elapsed: str = None
+    # 免费截止时间
+    freedate: str = None
     # 上传因子
     uploadvolumefactor: float = None
     # 下载因子
@@ -90,7 +93,9 @@ class TorrentInfo:
             "1.0 1.0": "普通",
             "1.0 0.0": "免费",
             "2.0 1.0": "2X",
+            "4.0 1.0": "4X",
             "2.0 0.0": "2X免费",
+            "4.0 0.0": "4X免费",
             "1.0 0.5": "50%",
             "2.0 0.5": "2X 50%",
             "1.0 0.7": "70%",
@@ -105,12 +110,22 @@ class TorrentInfo:
         """
         return self.get_free_string(self.uploadvolumefactor, self.downloadvolumefactor)
 
+    @property
+    def freedate_diff(self):
+        """
+        返回免费剩余时间
+        """
+        if not self.freedate:
+            return ""
+        return StringUtils.diff_time_str(self.freedate)
+
     def to_dict(self):
         """
         返回字典
         """
         dicts = asdict(self)
         dicts["volume_factor"] = self.volume_factor
+        dicts["freedate_diff"] = self.freedate_diff
         return dicts
 
 
@@ -272,7 +287,7 @@ class MediaInfo:
         初始化媒信息
         """
 
-        def __directors_actors(tmdbinfo: dict):
+        def __directors_actors(tmdbinfo: dict) -> Tuple[List[dict], List[dict]]:
             """
             查询导演和演员
             :param tmdbinfo: TMDB元数据
@@ -414,24 +429,31 @@ class MediaInfo:
         # 豆瓣ID
         self.douban_id = str(info.get("id"))
         # 类型
-
         if not self.type:
             if isinstance(info.get('media_type'), MediaType):
                 self.type = info.get('media_type')
-            else:
+            elif info.get("type"):
                 self.type = MediaType.MOVIE if info.get("type") == "movie" else MediaType.TV
+            elif info.get("type_name"):
+                self.type = MediaType(info.get("type_name"))
         # 标题
         if not self.title:
             self.title = info.get("title")
-            # 识别标题中的季
-            meta = MetaInfo(self.title)
-            self.season = meta.begin_season
         # 原语种标题
         if not self.original_title:
             self.original_title = info.get("original_title")
         # 年份
         if not self.year:
             self.year = info.get("year")[:4] if info.get("year") else None
+        # 识别标题中的季
+        meta = MetaInfo(info.get("title"))
+        # 季
+        if not self.season:
+            self.season = meta.begin_season
+            if self.season:
+                self.type = MediaType.TV
+            elif not self.type:
+                self.type = MediaType.MOVIE
         # 评分
         if not self.vote_average:
             rating = info.get("rating")
@@ -472,14 +494,34 @@ class MediaInfo:
             self.actors = info.get("actors") or []
         # 别名
         if not self.names:
-            self.names = info.get("aka") or []
+            akas = info.get("aka")
+            if akas:
+                self.names = [re.sub(r'\([港台豆友译名]+\)', "", aka) for aka in akas]
         # 剧集
         if self.type == MediaType.TV and not self.seasons:
             meta = MetaInfo(info.get("title"))
-            if meta.begin_season:
-                episodes_count = info.get("episodes_count")
-                if episodes_count:
-                    self.seasons[meta.begin_season] = list(range(1, episodes_count + 1))
+            season = meta.begin_season or 1
+            episodes_count = info.get("episodes_count")
+            if episodes_count:
+                self.seasons[season] = list(range(1, episodes_count + 1))
+        # 季年份
+        if self.type == MediaType.TV and not self.season_years:
+            season = self.season or 1
+            self.season_years = {
+                season: self.year
+            }
+        # 风格
+        if not self.genres:
+            self.genres = [{"id": genre, "name": genre} for genre in info.get("genres") or []]
+        # 时长
+        if not self.runtime and info.get("durations"):
+            # 查找数字
+            match = re.search(r'\d+', info.get("durations")[0])
+            if match:
+                self.runtime = int(match.group())
+        # 国家
+        if not self.production_countries:
+            self.production_countries = [{"id": country, "name": country} for country in info.get("countries") or []]
         # 剩余属性赋值
         for key, value in info.items():
             if not hasattr(self, key):

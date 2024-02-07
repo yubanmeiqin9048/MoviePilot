@@ -1,27 +1,43 @@
 import json
 import time
-import tailer
 from datetime import datetime
-from typing import Union
+from typing import Union, Any
 
-from fastapi import APIRouter, HTTPException, Depends
+import tailer
+from fastapi import APIRouter, HTTPException, Depends, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
 
 from app import schemas
 from app.chain.search import SearchChain
 from app.core.config import settings
 from app.core.security import verify_token
-from app.db import get_db
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
+from app.helper.sites import SitesHelper
+from app.scheduler import Scheduler
 from app.schemas.types import SystemConfigKey
 from app.utils.http import RequestUtils
 from app.utils.system import SystemUtils
 from version import APP_VERSION
 
 router = APIRouter()
+
+
+@router.get("/img/{imgurl:path}/{proxy}", summary="图片代理")
+def get_img(imgurl: str, proxy: bool = False) -> Any:
+    """
+    通过图片代理（使用代理服务器）
+    """
+    if not imgurl:
+        return None
+    if proxy:
+        response = RequestUtils(ua=settings.USER_AGENT, proxies=settings.PROXY).get_res(url=imgurl)
+    else:
+        response = RequestUtils(ua=settings.USER_AGENT).get_res(url=imgurl)
+    if response:
+        return Response(content=response.content, media_type="image/jpeg")
+    return None
 
 
 @router.get("/env", summary="查询系统环境变量", response_model=schemas.Response)
@@ -33,7 +49,9 @@ def get_env_setting(_: schemas.TokenPayload = Depends(verify_token)):
         exclude={"SECRET_KEY", "SUPERUSER_PASSWORD", "API_TOKEN"}
     )
     info.update({
-        "VERSION": APP_VERSION
+        "VERSION": APP_VERSION,
+        "AUTH_VERSION": SitesHelper().auth_version,
+        "INDEXER_VERSION": SitesHelper().indexer_version,
     })
     return schemas.Response(success=True,
                             data=info)
@@ -161,7 +179,8 @@ def latest_version(_: schemas.TokenPayload = Depends(verify_token)):
     """
     查询Github所有Release版本
     """
-    version_res = RequestUtils().get_res(f"https://api.github.com/repos/jxxghp/MoviePilot/releases")
+    version_res = RequestUtils(proxies=settings.PROXY, headers=settings.GITHUB_HEADERS).get_res(
+        f"https://api.github.com/repos/jxxghp/MoviePilot/releases")
     if version_res:
         ver_json = version_res.json()
         if ver_json:
@@ -173,7 +192,6 @@ def latest_version(_: schemas.TokenPayload = Depends(verify_token)):
 def ruletest(title: str,
              subtitle: str = None,
              ruletype: str = None,
-             db: Session = Depends(get_db),
              _: schemas.TokenPayload = Depends(verify_token)):
     """
     过滤规则测试，规则类型 1-订阅，2-洗版，3-搜索
@@ -192,8 +210,8 @@ def ruletest(title: str,
         return schemas.Response(success=False, message="优先级规则未设置！")
 
     # 过滤
-    result = SearchChain(db).filter_torrents(rule_string=rule_string,
-                                             torrent_list=[torrent])
+    result = SearchChain().filter_torrents(rule_string=rule_string,
+                                           torrent_list=[torrent])
     if not result:
         return schemas.Response(success=False, message="不符合优先级规则！")
     return schemas.Response(success=True, data={
@@ -211,3 +229,15 @@ def restart_system(_: schemas.TokenPayload = Depends(verify_token)):
     # 执行重启
     ret, msg = SystemUtils.restart()
     return schemas.Response(success=ret, message=msg)
+
+
+@router.get("/runscheduler", summary="运行服务", response_model=schemas.Response)
+def execute_command(jobid: str,
+                    _: schemas.TokenPayload = Depends(verify_token)):
+    """
+    执行命令
+    """
+    if not jobid:
+        return schemas.Response(success=False, message="命令不能为空！")
+    Scheduler().start(jobid)
+    return schemas.Response(success=True)

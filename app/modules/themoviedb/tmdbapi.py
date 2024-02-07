@@ -210,10 +210,10 @@ class TmdbHelper:
             else:
                 movies = self.search.movies(term=name)
         except TMDbException as err:
-            logger.error(f"连接TMDB出错：{err}")
+            logger.error(f"连接TMDB出错：{str(err)}")
             return None
         except Exception as e:
-            logger.error(f"连接TMDB出错：{e}")
+            logger.error(f"连接TMDB出错：{str(e)}")
             print(traceback.print_exc())
             return None
         logger.debug(f"API返回：{str(self.search.total_results)}")
@@ -258,10 +258,10 @@ class TmdbHelper:
             else:
                 tvs = self.search.tv_shows(term=name)
         except TMDbException as err:
-            logger.error(f"连接TMDB出错：{err}")
+            logger.error(f"连接TMDB出错：{str(err)}")
             return None
         except Exception as e:
-            logger.error(f"连接TMDB出错：{e}")
+            logger.error(f"连接TMDB出错：{str(e)}")
             print(traceback.print_exc())
             return None
         logger.debug(f"API返回：{str(self.search.total_results)}")
@@ -320,10 +320,10 @@ class TmdbHelper:
         try:
             tvs = self.search.tv_shows(term=name)
         except TMDbException as err:
-            logger.error(f"连接TMDB出错：{err}")
+            logger.error(f"连接TMDB出错：{str(err)}")
             return None
         except Exception as e:
-            logger.error(f"连接TMDB出错：{e}")
+            logger.error(f"连接TMDB出错：{str(e)}")
             print(traceback.print_exc())
             return None
 
@@ -400,10 +400,10 @@ class TmdbHelper:
         try:
             multis = self.search.multi(term=name) or []
         except TMDbException as err:
-            logger.error(f"连接TMDB出错：{err}")
+            logger.error(f"连接TMDB出错：{str(err)}")
             return None
         except Exception as e:
-            logger.error(f"连接TMDB出错：{e}")
+            logger.error(f"连接TMDB出错：{str(e)}")
             print(traceback.print_exc())
             return None
         logger.debug(f"API返回：{str(self.search.total_results)}")
@@ -508,7 +508,7 @@ class TmdbHelper:
                 else:
                     logger.info("%s TMDB网站未查询到媒体信息！" % name)
             except Exception as err:
-                logger.error(f"从TheDbMovie网站查询出错：{err}")
+                logger.error(f"从TheDbMovie网站查询出错：{str(err)}")
                 return None
         return None
 
@@ -1136,6 +1136,26 @@ class TmdbHelper:
     def get_person_detail(self, person_id: int) -> dict:
         """
         获取人物详情
+        {
+            "adult": false,
+            "also_known_as": [
+                "Michael Chen",
+                "Chen He",
+                "陈赫"
+            ],
+            "biography": "陈赫，xxx",
+            "birthday": "1985-11-09",
+            "deathday": null,
+            "gender": 2,
+            "homepage": "https://movie.douban.com/celebrity/1313841/",
+            "id": 1397016,
+            "imdb_id": "nm4369305",
+            "known_for_department": "Acting",
+            "name": "Chen He",
+            "place_of_birth": "Fuzhou，Fujian Province，China",
+            "popularity": 9.228,
+            "profile_path": "/2Bk39zVuoHUNHtpZ7LVg7OgkDd4.jpg"
+        }
         """
         if not self.person:
             return {}

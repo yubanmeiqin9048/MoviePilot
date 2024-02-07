@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Sequence
 from sqlalchemy.orm import Session
 
-from app.db.models import Base
+from app.db import db_query, Base
 
 
 class SiteIcon(Base):
@@ -19,5 +19,6 @@ class SiteIcon(Base):
     base64 = Column(String)
 
     @staticmethod
+    @db_query
     def get_by_domain(db: Session, domain: str):
         return db.query(SiteIcon).filter(SiteIcon.domain == domain).first()

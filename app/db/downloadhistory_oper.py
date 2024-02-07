@@ -24,12 +24,11 @@ class DownloadHistoryOper(DbOper):
         """
         return DownloadHistory.get_by_hash(self._db, download_hash)
 
-    def add(self, **kwargs) -> DownloadHistory:
+    def add(self, **kwargs):
         """
         新增下载历史
         """
-        downloadhistory = DownloadHistory(**kwargs)
-        return downloadhistory.create(self._db)
+        DownloadHistory(**kwargs).create(self._db)
 
     def add_files(self, file_items: List[dict]):
         """
@@ -58,7 +57,14 @@ class DownloadHistoryOper(DbOper):
         按fullpath查询下载文件记录
         :param fullpath: 数据key
         """
-        return DownloadFiles.get_by_fullpath(self._db, fullpath)
+        return DownloadFiles.get_by_fullpath(self._db, fullpath=fullpath, all_files=False)
+
+    def get_files_by_fullpath(self, fullpath: str) -> List[DownloadFiles]:
+        """
+        按fullpath查询下载文件记录
+        :param fullpath: 数据key
+        """
+        return DownloadFiles.get_by_fullpath(self._db, fullpath=fullpath, all_files=True)
 
     def get_files_by_savepath(self, fullpath: str) -> List[DownloadFiles]:
         """
@@ -73,6 +79,16 @@ class DownloadHistoryOper(DbOper):
         :param fullpath: 数据key
         """
         DownloadFiles.delete_by_fullpath(self._db, fullpath)
+
+    def get_hash_by_fullpath(self, fullpath: str) -> str:
+        """
+        按fullpath查询下载文件记录hash
+        :param fullpath: 数据key
+        """
+        fileinfo: DownloadFiles = DownloadFiles.get_by_fullpath(self._db, fullpath=fullpath, all_files=False)
+        if fileinfo:
+            return fileinfo.download_hash
+        return ""
 
     def list_by_page(self, page: int = 1, count: int = 30) -> List[DownloadHistory]:
         """
@@ -98,3 +114,21 @@ class DownloadHistoryOper(DbOper):
                                            season=season,
                                            episode=episode,
                                            tmdbid=tmdbid)
+
+    def list_by_user_date(self, date: str, username: str = None) -> List[DownloadHistory]:
+        """
+        查询某用户某时间之前的下载历史
+        """
+        return DownloadHistory.list_by_user_date(db=self._db,
+                                                 date=date,
+                                                 username=username)
+
+    def list_by_date(self, date: str, type: str, tmdbid: str, seasons: str = None) -> List[DownloadHistory]:
+        """
+        查询某时间之后的下载历史
+        """
+        return DownloadHistory.list_by_date(db=self._db,
+                                            date=date,
+                                            type=type,
+                                            tmdbid=tmdbid,
+                                            seasons=seasons)

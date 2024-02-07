@@ -16,16 +16,12 @@ class TorrentStatus(Enum):
 class EventType(Enum):
     # 插件重载
     PluginReload = "plugin.reload"
+    # 插件动作
+    PluginAction = "plugin.action"
     # 执行命令
     CommandExcute = "command.excute"
-    # 站点签到
-    SiteSignin = "site.signin"
-    # 站点数据统计
-    SiteStatistic = "site.statistic"
     # 站点删除
     SiteDeleted = "site.deleted"
-    # 豆瓣想看
-    DoubanSync = "douban.sync"
     # Webhook消息
     WebhookMessage = "webhook.message"
     # 转移完成
@@ -34,12 +30,16 @@ class EventType(Enum):
     DownloadAdded = "download.added"
     # 删除历史记录
     HistoryDeleted = "history.deleted"
-    # 删除媒体库文件
-    MediaDeleted = "media.deleted"
+    # 删除下载源文件
+    DownloadFileDeleted = "downloadfile.deleted"
     # 用户外来消息
     UserMessage = "user.message"
     # 通知消息
     NoticeMessage = "notice.message"
+    # 名称识别请求
+    NameRecognize = "name.recognize"
+    # 名称识别结果
+    NameRecognizeResult = "name.recognize.result"
 
 
 # 系统配置Key字典
@@ -58,6 +58,8 @@ class SystemConfigKey(Enum):
     NotificationChannels = "NotificationChannels"
     # 自定义制作组/字幕组
     CustomReleaseGroups = "CustomReleaseGroups"
+    # 自定义占位符
+    Customization = "Customization"
     # 自定义识别词
     CustomIdentifiers = "CustomIdentifiers"
     # 搜索优先级规则
@@ -66,8 +68,10 @@ class SystemConfigKey(Enum):
     SubscribeFilterRules = "SubscribeFilterRules"
     # 洗版规则
     BestVersionFilterRules = "BestVersionFilterRules"
-    # 默认过滤规则
+    # 默认订阅过滤规则
     DefaultFilterRules = "DefaultFilterRules"
+    # 默认搜索过滤规则
+    DefaultSearchFilterRules = "DefaultSearchFilterRules"
     # 转移屏蔽词
     TransferExcludeWords = "TransferExcludeWords"
 
@@ -82,8 +86,8 @@ class ProgressKey(Enum):
 
 # 媒体图片类型
 class MediaImageType(Enum):
-    Poster = "poster"
-    Backdrop = "backdrop"
+    Poster = "poster_path"
+    Backdrop = "backdrop_path"
 
 
 # 消息类型

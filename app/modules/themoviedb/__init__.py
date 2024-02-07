@@ -43,7 +43,8 @@ class TheMovieDbModule(_ModuleBase):
 
     def recognize_media(self, meta: MetaBase = None,
                         mtype: MediaType = None,
-                        tmdbid: int = None) -> Optional[MediaInfo]:
+                        tmdbid: int = None,
+                        **kwargs) -> Optional[MediaInfo]:
         """
         识别媒体信息
         :param meta:     识别的元数据
@@ -51,6 +52,9 @@ class TheMovieDbModule(_ModuleBase):
         :param tmdbid:   tmdbid
         :return: 识别的媒体信息，包括剧集信息
         """
+        if settings.RECOGNIZE_SOURCE != "themoviedb":
+            return None
+
         if not meta:
             cache_info = {}
         else:
@@ -63,7 +67,10 @@ class TheMovieDbModule(_ModuleBase):
                 # 直接查询详情
                 info = self.tmdb.get_info(mtype=mtype, tmdbid=tmdbid)
             elif meta:
-                logger.info(f"正在识别 {meta.name} ...")
+                if meta.begin_season:
+                    logger.info(f"正在识别 {meta.name} 第{meta.begin_season}季 ...")
+                else:
+                    logger.info(f"正在识别 {meta.name} ...")
                 if meta.type == MediaType.UNKNOWN and not meta.year:
                     info = self.tmdb.match_multi(meta.name)
                 else:
@@ -109,11 +116,11 @@ class TheMovieDbModule(_ModuleBase):
         else:
             # 使用缓存信息
             if cache_info.get("title"):
-                logger.info(f"{meta.name} 使用识别缓存：{cache_info.get('title')}")
+                logger.info(f"{meta.name} 使用TMDB识别缓存：{cache_info.get('title')}")
                 info = self.tmdb.get_info(mtype=cache_info.get("type"),
                                           tmdbid=cache_info.get("id"))
             else:
-                logger.info(f"{meta.name} 使用识别缓存：无法识别")
+                logger.info(f"{meta.name} 使用TMDB识别缓存：无法识别")
                 info = None
 
         if info:
@@ -126,11 +133,11 @@ class TheMovieDbModule(_ModuleBase):
             mediainfo = MediaInfo(tmdb_info=info)
             mediainfo.set_category(cat)
             if meta:
-                logger.info(f"{meta.name} 识别结果：{mediainfo.type.value} "
+                logger.info(f"{meta.name} TMDB识别结果：{mediainfo.type.value} "
                             f"{mediainfo.title_year} "
                             f"{mediainfo.tmdb_id}")
             else:
-                logger.info(f"{tmdbid} 识别结果：{mediainfo.type.value} "
+                logger.info(f"{tmdbid} TMDB识别结果：{mediainfo.type.value} "
                             f"{mediainfo.title_year}")
 
             # 补充剧集年份
@@ -140,9 +147,30 @@ class TheMovieDbModule(_ModuleBase):
                     mediainfo.season_years = episode_years
             return mediainfo
         else:
-            logger.info(f"{meta.name if meta else tmdbid} 未匹配到媒体信息")
+            logger.info(f"{meta.name if meta else tmdbid} 未匹配到TMDB媒体信息")
 
         return None
+
+    def match_tmdbinfo(self, name: str, mtype: MediaType = None,
+                       year: str = None, season: int = None) -> dict:
+        """
+        搜索和匹配TMDB信息
+        :param name:  名称
+        :param mtype:  类型
+        :param year:  年份
+        :param season:  季号
+        """
+        # 搜索
+        logger.info(f"开始使用 名称：{name}、年份：{year} 匹配TMDB信息 ...")
+        info = self.tmdb.match(name=name,
+                               year=year,
+                               mtype=mtype,
+                               season_year=year,
+                               season_number=season)
+        if info and not info.get("genres"):
+            info = self.tmdb.get_info(mtype=info.get("media_type"),
+                                      tmdbid=info.get("id"))
+        return info
 
     def tmdb_info(self, tmdbid: int, mtype: MediaType) -> Optional[dict]:
         """
@@ -160,7 +188,7 @@ class TheMovieDbModule(_ModuleBase):
         :reutrn: 媒体信息列表
         """
         # 未启用时返回None
-        if settings.SEARCH_SOURCE != "themoviedb":
+        if settings.RECOGNIZE_SOURCE != "themoviedb":
             return None
 
         if not meta.name:
@@ -184,11 +212,15 @@ class TheMovieDbModule(_ModuleBase):
 
         return [MediaInfo(tmdb_info=info) for info in results]
 
-    def scrape_metadata(self, path: Path, mediainfo: MediaInfo) -> None:
+    def scrape_metadata(self, path: Path, mediainfo: MediaInfo, transfer_type: str,
+                        force_nfo: bool = False, force_img: bool = False) -> None:
         """
         刮削元数据
         :param path: 媒体文件路径
         :param mediainfo:  识别的媒体信息
+        :param transfer_type:  转移类型
+        :param force_nfo:  强制刮削nfo
+        :param force_img:  强制刮削图片
         :return: 成功或失败
         """
         if settings.SCRAP_SOURCE != "themoviedb":
@@ -199,12 +231,18 @@ class TheMovieDbModule(_ModuleBase):
             logger.info(f"开始刮削蓝光原盘：{path} ...")
             scrape_path = path / path.name
             self.scraper.gen_scraper_files(mediainfo=mediainfo,
-                                           file_path=scrape_path)
+                                           file_path=scrape_path,
+                                           transfer_type=transfer_type,
+                                           force_nfo=force_nfo,
+                                           force_img=force_img)
         elif path.is_file():
             # 单个文件
             logger.info(f"开始刮削媒体库文件：{path} ...")
             self.scraper.gen_scraper_files(mediainfo=mediainfo,
-                                           file_path=path)
+                                           file_path=path,
+                                           transfer_type=transfer_type,
+                                           force_nfo=force_nfo,
+                                           force_img=force_img)
         else:
             # 目录下的所有文件
             logger.info(f"开始刮削目录：{path} ...")
@@ -212,7 +250,10 @@ class TheMovieDbModule(_ModuleBase):
                 if not file:
                     continue
                 self.scraper.gen_scraper_files(mediainfo=mediainfo,
-                                               file_path=file)
+                                               file_path=file,
+                                               transfer_type=transfer_type,
+                                               force_nfo=force_nfo,
+                                               force_img=force_img)
         logger.info(f"{path} 刮削完成")
 
     def tmdb_discover(self, mtype: MediaType, sort_by: str, with_genres: str, with_original_language: str,
@@ -280,6 +321,10 @@ class TheMovieDbModule(_ModuleBase):
         :param mediainfo:  识别的媒体信息
         :return: 更新后的媒体信息
         """
+        if settings.RECOGNIZE_SOURCE != "themoviedb":
+            return None
+        if not mediainfo.tmdb_id:
+            return mediainfo
         if mediainfo.logo_path \
                 and mediainfo.poster_path \
                 and mediainfo.backdrop_path:
@@ -345,38 +390,38 @@ class TheMovieDbModule(_ModuleBase):
                 image_path = seasoninfo.get(image_type.value)
 
         if image_path:
-            return f"https://image.tmdb.org/t/p/{image_prefix}{image_path}"
+            return f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/{image_prefix}{image_path}"
         return None
 
-    def movie_similar(self, tmdbid: int) -> List[dict]:
+    def tmdb_movie_similar(self, tmdbid: int) -> List[dict]:
         """
         根据TMDBID查询类似电影
         :param tmdbid:  TMDBID
         """
         return self.tmdb.get_movie_similar(tmdbid=tmdbid)
 
-    def tv_similar(self, tmdbid: int) -> List[dict]:
+    def tmdb_tv_similar(self, tmdbid: int) -> List[dict]:
         """
         根据TMDBID查询类似电视剧
         :param tmdbid:  TMDBID
         """
         return self.tmdb.get_tv_similar(tmdbid=tmdbid)
 
-    def movie_recommend(self, tmdbid: int) -> List[dict]:
+    def tmdb_movie_recommend(self, tmdbid: int) -> List[dict]:
         """
         根据TMDBID查询推荐电影
         :param tmdbid:  TMDBID
         """
         return self.tmdb.get_movie_recommend(tmdbid=tmdbid)
 
-    def tv_recommend(self, tmdbid: int) -> List[dict]:
+    def tmdb_tv_recommend(self, tmdbid: int) -> List[dict]:
         """
         根据TMDBID查询推荐电视剧
         :param tmdbid:  TMDBID
         """
         return self.tmdb.get_tv_recommend(tmdbid=tmdbid)
 
-    def movie_credits(self, tmdbid: int, page: int = 1) -> List[dict]:
+    def tmdb_movie_credits(self, tmdbid: int, page: int = 1) -> List[dict]:
         """
         根据TMDBID查询电影演职员表
         :param tmdbid:  TMDBID
@@ -384,7 +429,7 @@ class TheMovieDbModule(_ModuleBase):
         """
         return self.tmdb.get_movie_credits(tmdbid=tmdbid, page=page)
 
-    def tv_credits(self, tmdbid: int, page: int = 1) -> List[dict]:
+    def tmdb_tv_credits(self, tmdbid: int, page: int = 1) -> List[dict]:
         """
         根据TMDBID查询电视剧演职员表
         :param tmdbid:  TMDBID
@@ -392,14 +437,14 @@ class TheMovieDbModule(_ModuleBase):
         """
         return self.tmdb.get_tv_credits(tmdbid=tmdbid, page=page)
 
-    def person_detail(self, person_id: int) -> dict:
+    def tmdb_person_detail(self, person_id: int) -> dict:
         """
         根据TMDBID查询人物详情
         :param person_id:  人物ID
         """
         return self.tmdb.get_person_detail(person_id=person_id)
 
-    def person_credits(self, person_id: int, page: int = 1) -> List[dict]:
+    def tmdb_person_credits(self, person_id: int, page: int = 1) -> List[dict]:
         """
         根据TMDBID查询人物参演作品
         :param person_id:  人物ID
@@ -411,5 +456,7 @@ class TheMovieDbModule(_ModuleBase):
         """
         清除缓存
         """
+        logger.info("开始清除TMDB缓存 ...")
         self.tmdb.clear_cache()
         self.cache.clear()
+        logger.info("TMDB缓存清除完成")

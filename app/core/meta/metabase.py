@@ -51,12 +51,17 @@ class MetaBase(object):
     resource_pix: Optional[str] = None
     # 识别的制作组/字幕组
     resource_team: Optional[str] = None
+    # 识别的自定义占位符
+    customization: Optional[str] = None
     # 视频编码
     video_encode: Optional[str] = None
     # 音频编码
     audio_encode: Optional[str] = None
     # 应用的识别词信息
     apply_words: Optional[List[str]] = None
+    # 附加信息
+    tmdbid: int = None
+    doubanid: str = None
 
     # 副标题解析
     _subtitle_flag = False
@@ -84,6 +89,17 @@ class MetaBase(object):
         elif self.cn_name:
             return self.cn_name
         return ""
+
+    @name.setter
+    def name(self, name: str):
+        """
+        设置名称
+        """
+        if StringUtils.is_all_chinese(name):
+            self.cn_name = name
+        else:
+            self.en_name = name
+            self.cn_name = None
 
     def init_subtitle(self, title_text: str):
         """
@@ -492,6 +508,9 @@ class MetaBase(object):
         # 制作组/字幕组
         if not self.resource_team:
             self.resource_team = meta.resource_team
+        # 自定义占位符
+        if not self.customization:
+            self.customization = meta.customization
         # 特效
         if not self.resource_effect:
             self.resource_effect = meta.resource_effect

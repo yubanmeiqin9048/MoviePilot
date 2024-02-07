@@ -1,8 +1,11 @@
 import secrets
+import sys
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseSettings
+
+from app.utils.system import SystemUtils
 
 
 class Settings(BaseSettings):
@@ -22,6 +25,8 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     # API监听端口
     PORT: int = 3001
+    # 前端监听端口
+    NGINX_PORT: int = 3000
     # 是否调试模式
     DEBUG: bool = False
     # 是否开发模式
@@ -30,20 +35,20 @@ class Settings(BaseSettings):
     CONFIG_DIR: str = None
     # 超级管理员
     SUPERUSER: str = "admin"
-    # 超级管理员初始密码
-    SUPERUSER_PASSWORD: str = "password"
     # API密钥，需要更换
     API_TOKEN: str = "moviepilot"
+    # 登录页面电影海报,tmdb/bing
+    WALLPAPER: str = "tmdb"
     # 网络代理 IP:PORT
     PROXY_HOST: str = None
-    # 媒体信息搜索来源
-    SEARCH_SOURCE: str = "themoviedb"
+    # 媒体识别来源 themoviedb/douban
+    RECOGNIZE_SOURCE: str = "themoviedb"
+    # 刮削来源 themoviedb/douban
+    SCRAP_SOURCE: str = "themoviedb"
     # 刮削入库的媒体文件
     SCRAP_METADATA: bool = True
     # 新增已入库媒体是否跟随TMDB信息变化
     SCRAP_FOLLOW_TMDB: bool = True
-    # 刮削来源
-    SCRAP_SOURCE: str = "themoviedb"
     # TMDB图片地址
     TMDB_IMAGE_DOMAIN: str = "image.tmdb.org"
     # TMDB API地址
@@ -52,6 +57,8 @@ class Settings(BaseSettings):
     TMDB_API_KEY: str = "db55323b8d3e4154498498a75642b381"
     # TVDB API Key
     TVDB_API_KEY: str = "6b481081-10aa-440c-99f2-21d17717ee02"
+    # Fanart开关
+    FANART_ENABLE: bool = True
     # Fanart API Key
     FANART_API_KEY: str = "d2d31f9ecabea050fc7d68aa3146015f"
     # 支持的后缀格式
@@ -122,6 +129,10 @@ class Settings(BaseSettings):
     QB_PASSWORD: str = None
     # Qbittorrent分类自动管理
     QB_CATEGORY: bool = False
+    # Qbittorrent按顺序下载
+    QB_SEQUENTIAL: bool = True
+    # Qbittorrent忽略队列限制，强制继续
+    QB_FORCE_RESUME: bool = False
     # Transmission地址，IP:PORT
     TR_HOST: str = None
     # Transmission用户名
@@ -131,7 +142,7 @@ class Settings(BaseSettings):
     # 种子标签
     TORRENT_TAG: str = "MOVIEPILOT"
     # 下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_PATH: str = "/downloads"
+    DOWNLOAD_PATH: str = None
     # 电影下载保存目录，容器内映射路径需要一致
     DOWNLOAD_MOVIE_PATH: str = None
     # 电视剧下载保存目录，容器内映射路径需要一致
@@ -144,22 +155,26 @@ class Settings(BaseSettings):
     DOWNLOAD_SUBTITLE: bool = True
     # 媒体服务器 emby/jellyfin/plex，多个媒体服务器,分割
     MEDIASERVER: str = "emby"
-    # 入库刷新媒体库
-    REFRESH_MEDIASERVER: bool = True
     # 媒体服务器同步间隔（小时）
-    MEDIASERVER_SYNC_INTERVAL: int = 6
+    MEDIASERVER_SYNC_INTERVAL: Optional[int] = 6
     # 媒体服务器同步黑名单，多个媒体库名称,分割
     MEDIASERVER_SYNC_BLACKLIST: str = None
     # EMBY服务器地址，IP:PORT
     EMBY_HOST: str = None
+    # EMBY外网地址，http(s)://DOMAIN:PORT，未设置时使用EMBY_HOST
+    EMBY_PLAY_HOST: str = None
     # EMBY Api Key
     EMBY_API_KEY: str = None
     # Jellyfin服务器地址，IP:PORT
     JELLYFIN_HOST: str = None
+    # Jellyfin外网地址，http(s)://DOMAIN:PORT，未设置时使用JELLYFIN_HOST
+    JELLYFIN_PLAY_HOST: str = None
     # Jellyfin Api Key
     JELLYFIN_API_KEY: str = None
     # Plex服务器地址，IP:PORT
     PLEX_HOST: str = None
+    # Plex外网地址，http(s)://DOMAIN:PORT，未设置时使用PLEX_HOST
+    PLEX_PLAY_HOST: str = None
     # Plex Token
     PLEX_TOKEN: str = None
     # 转移方式 link/copy/move/softlink
@@ -171,18 +186,18 @@ class Settings(BaseSettings):
     # CookieCloud端对端加密密码
     COOKIECLOUD_PASSWORD: str = None
     # CookieCloud同步间隔（分钟）
-    COOKIECLOUD_INTERVAL: int = 60 * 24
+    COOKIECLOUD_INTERVAL: Optional[int] = 60 * 24
     # OCR服务器地址
     OCR_HOST: str = "https://movie-pilot.org"
     # CookieCloud对应的浏览器UA
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.57"
     # 媒体库目录，多个目录使用,分隔
     LIBRARY_PATH: str = None
-    # 电影媒体库目录名，默认"电影"
-    LIBRARY_MOVIE_NAME: str = None
-    # 电视剧媒体库目录名，默认"电视剧"
-    LIBRARY_TV_NAME: str = None
-    # 动漫媒体库目录名，默认"电视剧/动漫"
+    # 电影媒体库目录名
+    LIBRARY_MOVIE_NAME: str = "电影"
+    # 电视剧媒体库目录名
+    LIBRARY_TV_NAME: str = "电视剧"
+    # 动漫媒体库目录名，不设置时使用电视剧目录
     LIBRARY_ANIME_NAME: str = None
     # 二级分类
     LIBRARY_CATEGORY: bool = True
@@ -197,8 +212,16 @@ class Settings(BaseSettings):
                             "/Season {{season}}" \
                             "/{{title}} - {{season_episode}}{% if part %}-{{part}}{% endif %}{% if episode %} - 第 {{episode}} 集{% endif %}" \
                             "{{fileExt}}"
+    # 转移时覆盖模式
+    OVERWRITE_MODE: str = "size"
     # 大内存模式
     BIG_MEMORY_MODE: bool = False
+    # 插件市场仓库地址，多个地址使用,分隔，地址以/结尾
+    PLUGIN_MARKET: str = "https://github.com/jxxghp/MoviePilot-Plugins"
+    # Github token，提高请求api限流阈值 ghp_****
+    GITHUB_TOKEN: str = None
+    # 自动检查和更新站点资源包（站点索引、认证等）
+    AUTO_UPDATE_RESOURCE: bool = True
 
     @property
     def INNER_CONFIG_PATH(self):
@@ -208,7 +231,11 @@ class Settings(BaseSettings):
     def CONFIG_PATH(self):
         if self.CONFIG_DIR:
             return Path(self.CONFIG_DIR)
-        return self.INNER_CONFIG_PATH
+        elif SystemUtils.is_docker():
+            return Path("/config")
+        elif SystemUtils.is_frozen():
+            return Path(sys.executable).parent / "config"
+        return self.ROOT_PATH / "config"
 
     @property
     def TEMP_PATH(self):
@@ -266,13 +293,63 @@ class Settings(BaseSettings):
     def LIBRARY_PATHS(self) -> List[Path]:
         if self.LIBRARY_PATH:
             return [Path(path) for path in self.LIBRARY_PATH.split(",")]
-        return []
+        return [self.CONFIG_PATH / "library"]
 
-    def __init__(self):
-        super().__init__()
+    @property
+    def SAVE_PATH(self) -> Path:
+        """
+        获取下载保存目录
+        """
+        if self.DOWNLOAD_PATH:
+            return Path(self.DOWNLOAD_PATH)
+        return self.CONFIG_PATH / "downloads"
+
+    @property
+    def SAVE_MOVIE_PATH(self) -> Path:
+        """
+        获取电影下载保存目录
+        """
+        if self.DOWNLOAD_MOVIE_PATH:
+            return Path(self.DOWNLOAD_MOVIE_PATH)
+        return self.SAVE_PATH
+
+    @property
+    def SAVE_TV_PATH(self) -> Path:
+        """
+        获取电视剧下载保存目录
+        """
+        if self.DOWNLOAD_TV_PATH:
+            return Path(self.DOWNLOAD_TV_PATH)
+        return self.SAVE_PATH
+
+    @property
+    def SAVE_ANIME_PATH(self) -> Path:
+        """
+        获取动漫下载保存目录
+        """
+        if self.DOWNLOAD_ANIME_PATH:
+            return Path(self.DOWNLOAD_ANIME_PATH)
+        return self.SAVE_TV_PATH
+
+    @property
+    def GITHUB_HEADERS(self):
+        """
+        Github请求头
+        """
+        if self.GITHUB_TOKEN:
+            return {
+                "Authorization": f"Bearer {self.GITHUB_TOKEN}"
+            }
+        return {}
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         with self.CONFIG_PATH as p:
             if not p.exists():
                 p.mkdir(parents=True, exist_ok=True)
+            if SystemUtils.is_frozen():
+                if not (p / "app.env").exists():
+                    SystemUtils.copy(self.INNER_CONFIG_PATH / "app.env", p / "app.env")
         with self.TEMP_PATH as p:
             if not p.exists():
                 p.mkdir(parents=True, exist_ok=True)
@@ -284,4 +361,7 @@ class Settings(BaseSettings):
         case_sensitive = True
 
 
-settings = Settings()
+settings = Settings(
+    _env_file=Settings().CONFIG_PATH / "app.env",
+    _env_file_encoding="utf-8"
+)

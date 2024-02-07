@@ -25,35 +25,39 @@ class MediaServerOper(DbOper):
             return True
         return False
 
-    def empty(self, server: str):
+    def empty(self, server: Optional[str] = None):
         """
         清空媒体服务器数据
         """
         MediaServerItem.empty(self._db, server)
 
-    def exists(self, **kwargs) -> List[MediaServerItem]:
+    def exists(self, **kwargs) -> Optional[MediaServerItem]:
         """
         判断媒体服务器数据是否存在
         """
         items = []
+        items_valid= []
         if kwargs.get("tmdbid"):
             # 优先按TMDBID查
             items = MediaServerItem.exist_by_tmdbid(self._db, tmdbid=kwargs.get("tmdbid"),
-                                                    mtype=kwargs.get("mtype"))
-        else:
+                                                   mtype=kwargs.get("mtype"))
+        elif kwargs.get("title"):
             # 按标题、类型、年份查
-            items = MediaServerItem.exists_by_title(self._db, title=kwargs.get("title"),
-                                                    mtype=kwargs.get("mtype"), year=kwargs.get("year"))                                                   
+            items= MediaServerItem.exists_by_title(self._db, title=kwargs.get("title"),
+                                                   mtype=kwargs.get("mtype"), year=kwargs.get("year"))
+        else:
+            return items_valid
         for item in items:
             if kwargs.get("season"):
                 # 判断季是否存在
                 if not item.seasoninfo:
-                    return []
+                    continue
                 seasoninfo = json.loads(item.seasoninfo) or {}
                 if kwargs.get("season") not in seasoninfo.keys():
-                    return []
-        return items
-
+                    continue
+                items_valid.append(item)
+        return items_valid if items_valid else items
+    
     def get_item_id_list(self, **kwargs) -> List[str]:
         """
         获取媒体服务器数据ID

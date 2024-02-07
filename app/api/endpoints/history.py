@@ -6,11 +6,12 @@ from sqlalchemy.orm import Session
 
 from app import schemas
 from app.chain.transfer import TransferChain
+from app.core.event import eventmanager
 from app.core.security import verify_token
 from app.db import get_db
 from app.db.models.downloadhistory import DownloadHistory
 from app.db.models.transferhistory import TransferHistory
-from app.schemas import MediaType
+from app.schemas.types import EventType
 
 router = APIRouter()
 
@@ -41,17 +42,26 @@ def delete_download_history(history_in: schemas.DownloadHistory,
 def transfer_history(title: str = None,
                      page: int = 1,
                      count: int = 30,
+                     status: bool = None,
                      db: Session = Depends(get_db),
                      _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     查询转移历史记录
     """
+    if title == "失败":
+        title = None
+        status = False
+    elif title == "成功":
+        title = None
+        status = True
+
     if title:
-        total = TransferHistory.count_by_title(db, title)
-        result = TransferHistory.list_by_title(db, title, page, count)
+        total = TransferHistory.count_by_title(db, title=title, status=status)
+        result = TransferHistory.list_by_title(db, title=title, page=page,
+                                               count=count, status=status)
     else:
-        result = TransferHistory.list_by_page(db, page, count)
-        total = TransferHistory.count(db)
+        result = TransferHistory.list_by_page(db, page=page, count=count, status=status)
+        total = TransferHistory.count(db, status=status)
 
     return schemas.Response(success=True,
                             data={
@@ -74,27 +84,21 @@ def delete_transfer_history(history_in: schemas.TransferHistory,
         return schemas.Response(success=False, msg="记录不存在")
     # 册除媒体库文件
     if deletedest and history.dest:
-        TransferChain(db).delete_files(Path(history.dest))
+        state, msg = TransferChain().delete_files(Path(history.dest))
+        if not state:
+            return schemas.Response(success=False, msg=msg)
     # 删除源文件
     if deletesrc and history.src:
-        TransferChain(db).delete_files(Path(history.src))
+        state, msg = TransferChain().delete_files(Path(history.src))
+        if not state:
+            return schemas.Response(success=False, msg=msg)
+        # 发送事件
+        eventmanager.send_event(
+            EventType.DownloadFileDeleted,
+            {
+                "src": history.src
+            }
+        )
     # 删除记录
     TransferHistory.delete(db, history_in.id)
     return schemas.Response(success=True)
-
-
-@router.post("/transfer", summary="历史记录重新转移", response_model=schemas.Response)
-def redo_transfer_history(history_in: schemas.TransferHistory,
-                          mtype: str,
-                          new_tmdbid: int,
-                          db: Session = Depends(get_db),
-                          _: schemas.TokenPayload = Depends(verify_token)) -> Any:
-    """
-    历史记录重新转移
-    """
-    state, errmsg = TransferChain(db).re_transfer(logid=history_in.id,
-                                                  mtype=MediaType(mtype), tmdbid=new_tmdbid)
-    if state:
-        return schemas.Response(success=True)
-    else:
-        return schemas.Response(success=False, message=errmsg)

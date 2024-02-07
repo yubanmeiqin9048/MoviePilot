@@ -3,6 +3,8 @@ import os
 import platform
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import List, Union, Tuple
 
@@ -27,21 +29,61 @@ class SystemUtils:
 
     @staticmethod
     def is_docker() -> bool:
+        """
+        判断是否为Docker环境
+        """
         return Path("/.dockerenv").exists()
 
     @staticmethod
     def is_synology() -> bool:
+        """
+        判断是否为群晖系统
+        """
         if SystemUtils.is_windows():
             return False
         return True if "synology" in SystemUtils.execute('uname -a') else False
 
     @staticmethod
     def is_windows() -> bool:
+        """
+        判断是否为Windows系统
+        """
         return True if os.name == "nt" else False
 
     @staticmethod
+    def is_frozen() -> bool:
+        """
+        判断是否为冻结的二进制文件
+        """
+        return True if getattr(sys, 'frozen', False) else False
+
+    @staticmethod
     def is_macos() -> bool:
+        """
+        判断是否为MacOS系统
+        """
         return True if platform.system() == 'Darwin' else False
+
+    @staticmethod
+    def is_aarch64() -> bool:
+        """
+        判断是否为ARM64架构
+        """
+        return True if platform.machine() == 'aarch64' else False
+
+    @property
+    def platform(self) -> str:
+        """
+        获取系统平台
+        """
+        if SystemUtils.is_windows():
+            return "Windows"
+        elif SystemUtils.is_macos():
+            return "MacOS"
+        elif SystemUtils.is_aarch64():
+            return "Arm64"
+        else:
+            return "Linux"
 
     @staticmethod
     def copy(src: Path, dest: Path) -> Tuple[int, str]:
@@ -61,7 +103,9 @@ class SystemUtils:
         移动
         """
         try:
+            # 当前目录改名
             temp = src.replace(src.parent / dest.name)
+            # 移动到目标目录
             shutil.move(temp, dest)
             return 0, ""
         except Exception as err:
@@ -74,7 +118,13 @@ class SystemUtils:
         硬链接
         """
         try:
-            dest.hardlink_to(src)
+            # link到当前目录并改名
+            tmp_path = src.parent / (dest.name + ".mp")
+            if tmp_path.exists():
+                tmp_path.unlink()
+            tmp_path.hardlink_to(src)
+            # 移动到目标目录
+            shutil.move(tmp_path, dest)
             return 0, ""
         except Exception as err:
             print(str(err))
@@ -91,6 +141,54 @@ class SystemUtils:
         except Exception as err:
             print(str(err))
             return -1, str(err)
+
+    @staticmethod
+    def rclone_move(src: Path, dest: Path):
+        """
+        Rclone移动
+        """
+        try:
+            retcode = subprocess.run(
+                [
+                    'rclone', 'moveto',
+                    str(src),
+                    f'MP:{dest}'
+                ],
+                startupinfo=SystemUtils.__get_hidden_shell()
+            ).returncode
+            return retcode, ""
+        except Exception as err:
+            print(str(err))
+            return -1, str(err)
+
+    @staticmethod
+    def rclone_copy(src: Path, dest: Path):
+        """
+        Rclone复制
+        """
+        try:
+            retcode = subprocess.run(
+                [
+                    'rclone', 'copyto',
+                    str(src),
+                    f'MP:{dest}'
+                ],
+                startupinfo=SystemUtils.__get_hidden_shell()
+            ).returncode
+            return retcode, ""
+        except Exception as err:
+            print(str(err))
+            return -1, str(err)
+
+    @staticmethod
+    def __get_hidden_shell():
+        if SystemUtils.is_windows():
+            st = subprocess.STARTUPINFO()
+            st.dwFlags = subprocess.STARTF_USESHOWWINDOW
+            st.wShowWindow = subprocess.SW_HIDE
+            return st
+        else:
+            return None
 
     @staticmethod
     def list_files(directory: Path, extensions: list, min_filesize: int = 0) -> List[Path]:
@@ -341,6 +439,7 @@ class SystemUtils:
             # 创建 Docker 客户端
             client = docker.DockerClient(base_url='tcp://127.0.0.1:38379')
             # 获取当前容器的 ID
+            container_id = None
             with open('/proc/self/mountinfo', 'r') as f:
                 data = f.read()
                 index_resolv_conf = data.find("resolv.conf")
@@ -348,6 +447,12 @@ class SystemUtils:
                     index_second_slash = data.rfind("/", 0, index_resolv_conf)
                     index_first_slash = data.rfind("/", 0, index_second_slash) + 1
                     container_id = data[index_first_slash:index_second_slash]
+                    if len(container_id) < 20:
+                        index_resolv_conf = data.find("/sys/fs/cgroup/devices")
+                        if index_resolv_conf != -1:
+                            index_second_slash = data.rfind(" ", 0, index_resolv_conf)
+                            index_first_slash = data.rfind("/", 0, index_second_slash) + 1
+                            container_id = data[index_first_slash:index_second_slash]
             if not container_id:
                 return False, "获取容器ID失败！"
             # 重启当前容器

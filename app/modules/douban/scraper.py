@@ -1,54 +1,85 @@
 import time
 from pathlib import Path
+from typing import Union
 from xml.dom import minidom
 
+from app.core.config import settings
 from app.core.context import MediaInfo
 from app.core.meta import MetaBase
 from app.log import logger
 from app.schemas.types import MediaType
 from app.utils.dom import DomUtils
 from app.utils.http import RequestUtils
+from app.utils.system import SystemUtils
 
 
 class DoubanScraper:
+    _transfer_type = settings.TRANSFER_TYPE
+    _force_nfo = False
+    _force_img = False
 
-    def gen_scraper_files(self, meta: MetaBase, mediainfo: MediaInfo, file_path: Path):
+    def gen_scraper_files(self, meta: MetaBase, mediainfo: MediaInfo,
+                          file_path: Path, transfer_type: str,
+                          force_nfo: bool = False, force_img: bool = False):
         """
         生成刮削文件
         :param meta: 元数据
         :param mediainfo: 媒体信息
         :param file_path: 文件路径或者目录路径
+        :param transfer_type: 转输类型
+        :param force_nfo: 强制生成NFO
+        :param force_img: 强制生成图片
         """
+
+        self._transfer_type = transfer_type
+        self._force_nfo = force_nfo
+        self._force_img = force_img
 
         try:
             # 电影
             if mediainfo.type == MediaType.MOVIE:
                 # 强制或者不已存在时才处理
-                if not file_path.with_name("movie.nfo").exists() \
-                        and not file_path.with_suffix(".nfo").exists():
+                if self._force_nfo or (not file_path.with_name("movie.nfo").exists()
+                                       and not file_path.with_suffix(".nfo").exists()):
                     #  生成电影描述文件
                     self.__gen_movie_nfo_file(mediainfo=mediainfo,
                                               file_path=file_path)
                 # 生成电影图片
-                self.__save_image(url=mediainfo.poster_path,
-                                  file_path=file_path.with_name(f"poster{Path(mediainfo.poster_path).suffix}"))
+                image_path = file_path.with_name(f"poster{Path(mediainfo.poster_path).suffix}")
+                if self._force_img or not image_path.exists():
+                    self.__save_image(url=mediainfo.poster_path,
+                                      file_path=image_path)
+                # 背景图
+                if mediainfo.backdrop_path:
+                    image_path = file_path.with_name(f"backdrop{Path(mediainfo.backdrop_path).suffix}")
+                    if self._force_img or not image_path.exists():
+                        self.__save_image(url=mediainfo.backdrop_path,
+                                          file_path=image_path)
             # 电视剧
             else:
                 # 不存在时才处理
-                if not file_path.parent.with_name("tvshow.nfo").exists():
+                if self._force_nfo or not file_path.parent.with_name("tvshow.nfo").exists():
                     # 根目录描述文件
                     self.__gen_tv_nfo_file(mediainfo=mediainfo,
                                            dir_path=file_path.parents[1])
                 # 生成根目录图片
-                self.__save_image(url=mediainfo.poster_path,
-                                  file_path=file_path.with_name(f"poster{Path(mediainfo.poster_path).suffix}"))
+                image_path = file_path.with_name(f"poster{Path(mediainfo.poster_path).suffix}")
+                if self._force_img or not image_path.exists():
+                    self.__save_image(url=mediainfo.poster_path,
+                                      file_path=image_path)
+                # 背景图
+                if mediainfo.backdrop_path:
+                    image_path = file_path.with_name(f"backdrop{Path(mediainfo.backdrop_path).suffix}")
+                    if self._force_img or not image_path.exists():
+                        self.__save_image(url=mediainfo.backdrop_path,
+                                          file_path=image_path)
                 # 季目录NFO
-                if not file_path.with_name("season.nfo").exists():
+                if self._force_nfo or not file_path.with_name("season.nfo").exists():
                     self.__gen_tv_season_nfo_file(mediainfo=mediainfo,
                                                   season=meta.begin_season,
                                                   season_path=file_path.parent)
         except Exception as e:
-            logger.error(f"{file_path} 刮削失败：{e}")
+            logger.error(f"{file_path} 刮削失败：{str(e)}")
 
     @staticmethod
     def __gen_common_nfo(mediainfo: MediaInfo, doc, root):
@@ -154,31 +185,51 @@ class DoubanScraper:
         # 保存
         self.__save_nfo(doc, season_path.joinpath("season.nfo"))
 
-    @staticmethod
-    def __save_image(url: str, file_path: Path):
+    def __save_image(self, url: str, file_path: Path):
         """
         下载图片并保存
         """
-        if file_path.exists():
+        if not url:
             return
         try:
+            # 没有后缀时，处理URL转化为jpg格式
+            if not file_path.suffix:
+                url = url.replace("/format/webp", "/format/jpg")
+                file_path.with_suffix(".jpg")
             logger.info(f"正在下载{file_path.stem}图片：{url} ...")
             r = RequestUtils().get_res(url=url)
             if r:
-                file_path.write_bytes(r.content)
+                if self._transfer_type in ['rclone_move', 'rclone_copy']:
+                    self.__save_remove_file(file_path, r.content)
+                else:
+                    file_path.write_bytes(r.content)
                 logger.info(f"图片已保存：{file_path}")
             else:
                 logger.info(f"{file_path.stem}图片下载失败，请检查网络连通性")
         except Exception as err:
-            logger.error(f"{file_path.stem}图片下载失败：{err}")
+            logger.error(f"{file_path.stem}图片下载失败：{str(err)}")
 
-    @staticmethod
-    def __save_nfo(doc, file_path: Path):
+    def __save_nfo(self, doc, file_path: Path):
         """
         保存NFO
         """
-        if file_path.exists():
-            return
         xml_str = doc.toprettyxml(indent="  ", encoding="utf-8")
-        file_path.write_bytes(xml_str)
+        if self._transfer_type in ['rclone_move', 'rclone_copy']:
+            self.__save_remove_file(file_path, xml_str)
+        else:
+            file_path.write_bytes(xml_str)
         logger.info(f"NFO文件已保存：{file_path}")
+
+    def __save_remove_file(self, out_file: Path, content: Union[str, bytes]):
+        """
+        保存文件到远端
+        """
+        temp_file = settings.TEMP_PATH / str(out_file)[1:]
+        temp_file_dir = temp_file.parent
+        if not temp_file_dir.exists():
+            temp_file_dir.mkdir(parents=True, exist_ok=True)
+        temp_file.write_bytes(content)
+        if self._transfer_type == 'rclone_move':
+            SystemUtils.rclone_move(temp_file, out_file)
+        elif self._transfer_type == 'rclone_copy':
+            SystemUtils.rclone_copy(temp_file, out_file)

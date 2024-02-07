@@ -4,7 +4,6 @@ import cn2an
 import regex as re
 
 from app.db.systemconfig_oper import SystemConfigOper
-from app.log import logger
 from app.schemas.types import SystemConfigKey
 from app.utils.singleton import Singleton
 
@@ -61,8 +60,7 @@ class WordsMatcher(metaclass=Singleton):
 
                 if state:
                     appley_words.append(word)
-                else:
-                    logger.debug(f"自定义识别词替换失败：{message}")
+
             except Exception as err:
                 print(str(err))
 

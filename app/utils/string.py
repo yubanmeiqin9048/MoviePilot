@@ -64,10 +64,29 @@ class StringUtils:
         return str(round(time_sec / (b + 1))) + u
 
     @staticmethod
+    def str_secends(time_sec: Union[str, int, float]) -> str:
+        """
+        将秒转为时分秒字符串
+        """
+        hours = time_sec // 3600
+        remainder_seconds = time_sec % 3600
+        minutes = remainder_seconds // 60
+        seconds = remainder_seconds % 60
+
+        time: str = str(int(seconds)) + '秒'
+        if minutes:
+            time = str(int(minutes)) + '分' + time
+        if hours:
+            time = str(int(hours)) + '时' + time
+        return time
+
+    @staticmethod
     def is_chinese(word: Union[str, list]) -> bool:
         """
         判断是否含有中文
         """
+        if not word:
+            return False
         if isinstance(word, list):
             word = " ".join(word)
         chn = re.compile(r'[\u4e00-\u9fff]')
@@ -654,3 +673,67 @@ class StringUtils:
             return True
         except ValueError:
             return False
+
+    @staticmethod
+    def find_common_prefix(str1: str, str2: str) -> str:
+        if not str1 or not str2:
+            return ''
+        common_prefix = []
+        min_len = min(len(str1), len(str2))
+
+        for i in range(min_len):
+            if str1[i] == str2[i]:
+                common_prefix.append(str1[i])
+            else:
+                break
+
+        return ''.join(common_prefix)
+
+    @staticmethod
+    def compare_version(v1: str, v2: str) -> int:
+        """
+        比较两个版本号的大小，v1 > v2时返回1，v1 < v2时返回-1，v1 = v2时返回0
+        """
+        if not v1 or not v2:
+            return 0
+        v1 = v1.replace('v', '')
+        v2 = v2.replace('v', '')
+        v1 = [int(x) for x in v1.split('.')]
+        v2 = [int(x) for x in v2.split('.')]
+        for i in range(min(len(v1), len(v2))):
+            if v1[i] > v2[i]:
+                return 1
+            elif v1[i] < v2[i]:
+                return -1
+        if len(v1) > len(v2):
+            return 1
+        elif len(v1) < len(v2):
+            return -1
+        else:
+            return 0
+
+    @staticmethod
+    def diff_time_str(time_str: str):
+        """
+        输入YYYY-MM-DD HH24:MI:SS 格式的时间字符串，返回距离现在的剩余时间：xx天xx小时xx分钟
+        """
+        if not time_str:
+            return ''
+        try:
+            time_obj = datetime.datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            return ''
+        now = datetime.datetime.now()
+        diff = time_obj - now
+        diff_seconds = diff.seconds
+        diff_days = diff.days
+        diff_hours = diff_seconds // 3600
+        diff_minutes = (diff_seconds % 3600) // 60
+        if diff_days > 0:
+            return f'{diff_days}天{diff_hours}小时{diff_minutes}分钟'
+        elif diff_hours > 0:
+            return f'{diff_hours}小时{diff_minutes}分钟'
+        elif diff_minutes > 0:
+            return f'{diff_minutes}分钟'
+        else:
+            return ''

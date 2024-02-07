@@ -1,14 +1,15 @@
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import Column, Integer, String, Sequence
 from sqlalchemy.orm import Session
 
-from app.db.models import Base
+from app.db import db_query, db_update, Base
 
 
 class MediaServerItem(Base):
     """
-    站点表
+    媒体服务器媒体条目表
     """
     id = Column(Integer, Sequence('id'), primary_key=True, index=True)
     # 服务器类型
@@ -41,20 +42,26 @@ class MediaServerItem(Base):
     lst_mod_date = Column(String, default=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     @staticmethod
+    @db_query
     def get_by_itemid(db: Session, item_id: str):
         return db.query(MediaServerItem).filter(MediaServerItem.item_id == item_id).first()
 
     @staticmethod
-    def empty(db: Session, server: str):
-        db.query(MediaServerItem).filter(MediaServerItem.server == server).delete()
-        Base.commit(db)
+    @db_update
+    def empty(db: Session, server: Optional[str] = None):
+        if server is None:
+            db.query(MediaServerItem).delete()
+        else:
+            db.query(MediaServerItem).filter(MediaServerItem.server == server).delete()
 
     @staticmethod
+    @db_query
     def exist_by_tmdbid(db: Session, tmdbid: int, mtype: str):
         return db.query(MediaServerItem).filter(MediaServerItem.tmdbid == tmdbid,
                                                 MediaServerItem.item_type == mtype).all()
 
     @staticmethod
+    @db_query
     def exists_by_title(db: Session, title: str, mtype: str, year: str):
         return db.query(MediaServerItem).filter(MediaServerItem.title == title,
                                                 MediaServerItem.item_type == mtype,

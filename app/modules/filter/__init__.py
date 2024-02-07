@@ -70,14 +70,24 @@ class FilterModule(_ModuleBase):
             "include": [r'[Hx].?264|AVC'],
             "exclude": []
         },
-        # 杜比
+        # 杜比视界
         "DOLBY": {
             "include": [r"Dolby[\s.]+Vision|DOVI|[\s.]+DV[\s.]+|杜比视界"],
+            "exclude": []
+        },
+        # 杜比全景声
+        "ATMOS": {
+            "include": [r"Dolby[\s.+]+Atmos|Atmos|杜比全景[声聲]"],
             "exclude": []
         },
         # HDR
         "HDR": {
             "include": [r"[\s.]+HDR[\s.]+|HDR10|HDR10\+"],
+            "exclude": []
+        },
+        # SDR
+        "SDR": {
+            "include": [r"[\s.]+SDR[\s.]+"],
             "exclude": []
         },
         # 重编码
@@ -96,9 +106,24 @@ class FilterModule(_ModuleBase):
         },
         # 国语配音
         "CNVOI": {
-            "include": [r'[国國][语語]配音|[国國]配'],
+            "include": [r'[国國][语語]配音|[国國]配|[国國][语語]'],
             "exclude": []
-        }
+        },
+        # 粤语配音
+        "HKVOI": {
+            "include": [r'粤语配音|粤语'],
+            "exclude": []
+        },
+        # 60FPS
+        "60FPS": {
+            "include": [r'60fps'],
+            "exclude": []
+        },
+        # 3D
+        "3D": {
+            "include": [r'3D'],
+            "exclude": []
+        },
     }
 
     def init_module(self) -> None:

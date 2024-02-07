@@ -1,14 +1,22 @@
-from typing import Any
+import copy
+import json
+import re
+from typing import Any, Optional, Dict
 
-from app.chain.download import *
+from app.chain import ChainBase
+from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
 from app.chain.subscribe import SubscribeChain
-from app.core.context import MediaInfo
+from app.core.config import settings
+from app.core.context import MediaInfo, Context
 from app.core.event import EventManager
+from app.core.meta import MetaBase
+from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import Notification
-from app.schemas.types import EventType, MessageChannel
+from app.schemas.types import EventType, MessageChannel, MediaType
+from app.utils.string import StringUtils
 
 # 当前页面
 _current_page: int = 0
@@ -27,13 +35,12 @@ class MessageChain(ChainBase):
     # 每页数据量
     _page_size: int = 8
 
-    def __init__(self, db: Session = None):
-        super().__init__(db)
-        self.downloadchain = DownloadChain(self._db)
-        self.subscribechain = SubscribeChain(self._db)
-        self.searchchain = SearchChain(self._db)
-        self.medtachain = MediaChain(self._db)
-        self.torrent = TorrentHelper()
+    def __init__(self):
+        super().__init__()
+        self.downloadchain = DownloadChain()
+        self.subscribechain = SubscribeChain()
+        self.searchchain = SearchChain()
+        self.medtachain = MediaChain()
         self.eventmanager = EventManager()
         self.torrenthelper = TorrentHelper()
 
@@ -86,13 +93,15 @@ class MessageChain(ChainBase):
                 # 发送消息
                 self.post_message(Notification(channel=channel, title="输入有误！", userid=userid))
                 return
+            # 选择的序号
+            _choice = int(text) + _current_page * self._page_size - 1
             # 缓存类型
             cache_type: str = cache_data.get('type')
             # 缓存列表
-            cache_list: list = cache_data.get('items')
+            cache_list: list = copy.deepcopy(cache_data.get('items'))
             # 选择
             if cache_type == "Search":
-                mediainfo: MediaInfo = cache_list[int(text) + _current_page * self._page_size - 1]
+                mediainfo: MediaInfo = cache_list[_choice]
                 _current_media = mediainfo
                 # 查询缺失的媒体信息
                 exist_flag, no_exists = self.downloadchain.get_no_exists_info(meta=_current_meta,
@@ -107,11 +116,13 @@ class MessageChain(ChainBase):
                 # 发送缺失的媒体信息
                 if no_exists:
                     # 发送消息
+                    mediakey = mediainfo.tmdb_id or mediainfo.douban_id
                     messages = [
                         f"第 {sea} 季缺失 {StringUtils.str_series(no_exist.episodes) if no_exist.episodes else no_exist.total_episode} 集"
-                        for sea, no_exist in no_exists.get(mediainfo.tmdb_id).items()]
+                        for sea, no_exist in no_exists.get(mediakey).items()]
                     self.post_message(Notification(channel=channel,
-                                                   title=f"{mediainfo.title_year}：\n" + "\n".join(messages)))
+                                                   title=f"{mediainfo.title_year}：\n" + "\n".join(messages),
+                                                   userid=userid))
                 # 搜索种子，过滤掉不需要的剧集，以便选择
                 logger.info(f"{mediainfo.title_year} 媒体库中不存在，开始搜索 ...")
                 self.post_message(
@@ -133,7 +144,7 @@ class MessageChain(ChainBase):
                 # 判断是否设置自动下载
                 auto_download_user = settings.AUTO_DOWNLOAD_USER
                 # 匹配到自动下载用户
-                if auto_download_user and any(userid == user for user in auto_download_user.split(",")):
+                if auto_download_user and (auto_download_user == "all" or any(userid == user for user in auto_download_user.split(","))):
                     logger.info(f"用户 {userid} 在自动下载用户中，开始自动择优下载")
                     # 自动选择下载
                     self.__auto_download(channel=channel,
@@ -156,7 +167,7 @@ class MessageChain(ChainBase):
 
             elif cache_type == "Subscribe":
                 # 订阅媒体
-                mediainfo: MediaInfo = cache_list[int(text) - 1]
+                mediainfo: MediaInfo = cache_list[_choice]
                 # 查询缺失的媒体信息
                 exist_flag, _ = self.downloadchain.get_no_exists_info(meta=_current_meta,
                                                                       mediainfo=mediainfo)
@@ -185,9 +196,9 @@ class MessageChain(ChainBase):
                                          username=username)
                 else:
                     # 下载种子
-                    context: Context = cache_list[int(text) - 1]
+                    context: Context = cache_list[_choice]
                     # 下载
-                    self.downloadchain.download_single(context, userid=userid)
+                    self.downloadchain.download_single(context, userid=userid, channel=channel, username=username)
 
         elif text.lower() == "p":
             # 上一页
@@ -203,10 +214,11 @@ class MessageChain(ChainBase):
                 self.post_message(Notification(
                     channel=channel, title="已经是第一页了！", userid=userid))
                 return
-            cache_type: str = cache_data.get('type')
-            cache_list: list = cache_data.get('items')
             # 减一页
             _current_page -= 1
+            cache_type: str = cache_data.get('type')
+            # 产生副本，避免修改原值
+            cache_list: list = copy.deepcopy(cache_data.get('items'))
             if _current_page == 0:
                 start = 0
                 end = self._page_size
@@ -214,11 +226,6 @@ class MessageChain(ChainBase):
                 start = _current_page * self._page_size
                 end = start + self._page_size
             if cache_type == "Torrent":
-                # 更新缓存
-                user_cache[userid] = {
-                    "type": "Torrent",
-                    "items": cache_list[start:end]
-                }
                 # 发送种子数据
                 self.__post_torrents_message(channel=channel,
                                              title=_current_media.title,
@@ -242,7 +249,8 @@ class MessageChain(ChainBase):
                     channel=channel, title="输入有误！", userid=userid))
                 return
             cache_type: str = cache_data.get('type')
-            cache_list: list = cache_data.get('items')
+            # 产生副本，避免修改原值
+            cache_list: list = copy.deepcopy(cache_data.get('items'))
             total = len(cache_list)
             # 加一页
             cache_list = cache_list[
@@ -256,11 +264,6 @@ class MessageChain(ChainBase):
                 # 加一页
                 _current_page += 1
                 if cache_type == "Torrent":
-                    # 更新缓存
-                    user_cache[userid] = {
-                        "type": "Torrent",
-                        "items": cache_list
-                    }
                     # 发送种子数据
                     self.__post_torrents_message(channel=channel,
                                                  title=_current_media.title,
@@ -349,13 +352,21 @@ class MessageChain(ChainBase):
         downloads, lefts = self.downloadchain.batch_download(contexts=cache_list,
                                                              no_exists=no_exists,
                                                              channel=channel,
-                                                             userid=userid)
+                                                             userid=userid,
+                                                             username=username)
         if downloads and not lefts:
             # 全部下载完成
             logger.info(f'{_current_media.title_year} 下载完成')
         else:
             # 未完成下载
             logger.info(f'{_current_media.title_year} 未下载未完整，添加订阅 ...')
+            if downloads and _current_media.type == MediaType.TV:
+                # 获取已下载剧集
+                downloaded = [download.meta_info.begin_episode for download in downloads
+                              if download.meta_info.begin_episode]
+                note = json.dumps(downloaded)
+            else:
+                note = None
             # 添加订阅，状态为R
             self.subscribechain.add(title=_current_media.title,
                                     year=_current_media.year,
@@ -365,7 +376,8 @@ class MessageChain(ChainBase):
                                     channel=channel,
                                     userid=userid,
                                     username=username,
-                                    state="R")
+                                    state="R",
+                                    note=note)
 
     def __post_medias_message(self, channel: MessageChannel,
                               title: str, items: list, userid: str, total: int):

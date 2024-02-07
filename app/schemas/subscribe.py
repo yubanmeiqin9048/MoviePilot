@@ -31,6 +31,12 @@ class Subscribe(BaseModel):
     include: Optional[str] = None
     # 排除
     exclude: Optional[str] = None
+    # 质量
+    quality: Optional[str] = None
+    # 分辨率
+    resolution: Optional[str] = None
+    # 特效
+    effect: Optional[str] = None
     # 总集数
     total_episode: Optional[int] = 0
     # 开始集数
@@ -51,6 +57,8 @@ class Subscribe(BaseModel):
     best_version: Optional[int] = 0
     # 当前优先级
     current_priority: Optional[int] = None
+    # 保存路径
+    save_path: Optional[str] = None
 
     class Config:
         orm_mode = True

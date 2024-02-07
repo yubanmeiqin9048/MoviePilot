@@ -5,13 +5,14 @@ from cachetools import cached, TTLCache
 
 from app import schemas
 from app.chain import ChainBase
+from app.core.config import settings
 from app.schemas import MediaType
 from app.utils.singleton import Singleton
 
 
 class TmdbChain(ChainBase, metaclass=Singleton):
     """
-    TheMovieDB处理链
+    TheMovieDB处理链，单例运行
     """
 
     def tmdb_discover(self, mtype: MediaType, sort_by: str, with_genres: str,
@@ -24,17 +25,21 @@ class TmdbChain(ChainBase, metaclass=Singleton):
         :param page:  页码
         :return: 媒体信息列表
         """
+        if settings.RECOGNIZE_SOURCE != "themoviedb":
+            return None
         return self.run_module("tmdb_discover", mtype=mtype,
                                sort_by=sort_by, with_genres=with_genres,
                                with_original_language=with_original_language,
                                page=page)
 
-    def tmdb_trending(self, page: int = 1) -> List[dict]:
+    def tmdb_trending(self, page: int = 1) -> Optional[List[dict]]:
         """
         TMDB流行趋势
         :param page: 第几页
         :return: TMDB信息列表
         """
+        if settings.RECOGNIZE_SOURCE != "themoviedb":
+            return None
         return self.run_module("tmdb_trending", page=page)
 
     def tmdb_seasons(self, tmdbid: int) -> List[schemas.TmdbSeason]:
@@ -57,28 +62,28 @@ class TmdbChain(ChainBase, metaclass=Singleton):
         根据TMDBID查询类似电影
         :param tmdbid:  TMDBID
         """
-        return self.run_module("movie_similar", tmdbid=tmdbid)
+        return self.run_module("tmdb_movie_similar", tmdbid=tmdbid)
 
     def tv_similar(self, tmdbid: int) -> List[dict]:
         """
         根据TMDBID查询类似电视剧
         :param tmdbid:  TMDBID
         """
-        return self.run_module("tv_similar", tmdbid=tmdbid)
+        return self.run_module("tmdb_tv_similar", tmdbid=tmdbid)
 
     def movie_recommend(self, tmdbid: int) -> List[dict]:
         """
         根据TMDBID查询推荐电影
         :param tmdbid:  TMDBID
         """
-        return self.run_module("movie_recommend", tmdbid=tmdbid)
+        return self.run_module("tmdb_movie_recommend", tmdbid=tmdbid)
 
     def tv_recommend(self, tmdbid: int) -> List[dict]:
         """
         根据TMDBID查询推荐电视剧
         :param tmdbid:  TMDBID
         """
-        return self.run_module("tv_recommend", tmdbid=tmdbid)
+        return self.run_module("tmdb_tv_recommend", tmdbid=tmdbid)
 
     def movie_credits(self, tmdbid: int, page: int = 1) -> List[dict]:
         """
@@ -86,7 +91,7 @@ class TmdbChain(ChainBase, metaclass=Singleton):
         :param tmdbid:  TMDBID
         :param page:  页码
         """
-        return self.run_module("movie_credits", tmdbid=tmdbid, page=page)
+        return self.run_module("tmdb_movie_credits", tmdbid=tmdbid, page=page)
 
     def tv_credits(self, tmdbid: int, page: int = 1) -> List[dict]:
         """
@@ -94,14 +99,14 @@ class TmdbChain(ChainBase, metaclass=Singleton):
         :param tmdbid:  TMDBID
         :param page:  页码
         """
-        return self.run_module("tv_credits", tmdbid=tmdbid, page=page)
+        return self.run_module("tmdb_tv_credits", tmdbid=tmdbid, page=page)
 
     def person_detail(self, person_id: int) -> dict:
         """
         根据TMDBID查询演职员详情
         :param person_id:  人物ID
         """
-        return self.run_module("person_detail", person_id=person_id)
+        return self.run_module("tmdb_person_detail", person_id=person_id)
 
     def person_credits(self, person_id: int, page: int = 1) -> List[dict]:
         """
@@ -109,7 +114,7 @@ class TmdbChain(ChainBase, metaclass=Singleton):
         :param person_id:  人物ID
         :param page:  页码
         """
-        return self.run_module("person_credits", person_id=person_id, page=page)
+        return self.run_module("tmdb_person_credits", person_id=person_id, page=page)
 
     @cached(cache=TTLCache(maxsize=1, ttl=3600))
     def get_random_wallpager(self):
@@ -122,5 +127,5 @@ class TmdbChain(ChainBase, metaclass=Singleton):
             while True:
                 info = random.choice(infos)
                 if info and info.get("backdrop_path"):
-                    return f"https://image.tmdb.org/t/p/original{info.get('backdrop_path')}"
+                    return f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{info.get('backdrop_path')}"
         return None

@@ -2,7 +2,7 @@ from sqlalchemy import Boolean, Column, Integer, String, Sequence
 from sqlalchemy.orm import Session
 
 from app.core.security import verify_password
-from app.db.models import Base
+from app.db import db_query, db_update, Base
 
 
 class User(Base):
@@ -25,6 +25,7 @@ class User(Base):
     avatar = Column(String)
 
     @staticmethod
+    @db_query
     def authenticate(db: Session, name: str, password: str):
         user = db.query(User).filter(User.name == name).first()
         if not user:
@@ -34,9 +35,11 @@ class User(Base):
         return user
 
     @staticmethod
+    @db_query
     def get_by_name(db: Session, name: str):
         return db.query(User).filter(User.name == name).first()
 
+    @db_update
     def delete_by_name(self, db: Session, name: str):
         user = self.get_by_name(db, name)
         if user:

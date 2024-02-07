@@ -15,7 +15,10 @@ class SubscribeOper(DbOper):
         """
         新增订阅
         """
-        subscribe = Subscribe.exists(self._db, tmdbid=mediainfo.tmdb_id, season=kwargs.get('season'))
+        subscribe = Subscribe.exists(self._db,
+                                     tmdbid=mediainfo.tmdb_id,
+                                     doubanid=mediainfo.douban_id,
+                                     season=kwargs.get('season'))
         if not subscribe:
             subscribe = Subscribe(name=mediainfo.title,
                                   year=mediainfo.year,
@@ -23,6 +26,7 @@ class SubscribeOper(DbOper):
                                   tmdbid=mediainfo.tmdb_id,
                                   imdbid=mediainfo.imdb_id,
                                   tvdbid=mediainfo.tvdb_id,
+                                  doubanid=mediainfo.douban_id,
                                   poster=mediainfo.get_poster_image(),
                                   backdrop=mediainfo.get_backdrop_image(),
                                   vote=mediainfo.vote_average,
@@ -30,18 +34,27 @@ class SubscribeOper(DbOper):
                                   date=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
                                   **kwargs)
             subscribe.create(self._db)
+            # 查询订阅
+            subscribe = Subscribe.exists(self._db,
+                                         tmdbid=mediainfo.tmdb_id,
+                                         doubanid=mediainfo.douban_id,
+                                         season=kwargs.get('season'))
             return subscribe.id, "新增订阅成功"
         else:
             return subscribe.id, "订阅已存在"
 
-    def exists(self, tmdbid: int, season: int) -> bool:
+    def exists(self, tmdbid: int = None, doubanid: str = None, season: int = None) -> bool:
         """
         判断是否存在
         """
-        if season:
-            return True if Subscribe.exists(self._db, tmdbid=tmdbid, season=season) else False
-        else:
-            return True if Subscribe.exists(self._db, tmdbid=tmdbid) else False
+        if tmdbid:
+            if season:
+                return True if Subscribe.exists(self._db, tmdbid=tmdbid, season=season) else False
+            else:
+                return True if Subscribe.exists(self._db, tmdbid=tmdbid) else False
+        elif doubanid:
+            return True if Subscribe.exists(self._db, doubanid=doubanid) else False
+        return False
 
     def get(self, sid: int) -> Subscribe:
         """

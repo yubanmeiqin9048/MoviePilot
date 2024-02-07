@@ -12,9 +12,9 @@ from ruamel.yaml import CommentedMap
 from app.core.config import settings
 from app.helper.browser import PlaywrightHelper
 from app.log import logger
+from app.schemas.types import MediaType
 from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
-from app.schemas.types import MediaType
 
 
 class TorrentSpider:
@@ -40,8 +40,6 @@ class TorrentSpider:
     referer: str = None
     # 搜索关键字
     keyword: str = None
-    # 搜索IMDBID
-    imdbid: str = None
     # 媒体类型
     mtype: MediaType = None
     # 搜索路径、方式配置
@@ -68,7 +66,6 @@ class TorrentSpider:
     def __init__(self,
                  indexer: CommentedMap,
                  keyword: [str, list] = None,
-                 imdbid: str = None,
                  page: int = 0,
                  referer: str = None,
                  mtype: MediaType = None):
@@ -76,7 +73,6 @@ class TorrentSpider:
         设置查询参数
         :param indexer: 索引器
         :param keyword: 搜索关键字，如果数组则为批量搜索
-        :param imdbid: IMDB ID
         :param page: 页码
         :param referer: Referer
         :param mtype: 媒体类型
@@ -84,7 +80,6 @@ class TorrentSpider:
         if not indexer:
             return
         self.keyword = keyword
-        self.imdbid = imdbid
         self.mtype = mtype
         self.indexerid = indexer.get('id')
         self.indexername = indexer.get('name')
@@ -176,20 +171,17 @@ class TorrentSpider:
             # 搜索URL
             indexer_params = self.search.get("params") or {}
             if indexer_params:
-                # 支持IMDBID时优先使用IMDBID搜索
-                search_area = indexer_params.get("search_area") or 0
-                if self.imdbid and search_area:
-                    search_word = self.imdbid
-                else:
-                    search_word = self.keyword
-                    # 不启用IMDBID搜索时需要将search_area移除
-                    if search_area:
-                        indexer_params.pop('search_area')
+                search_area = indexer_params.get('search_area')
+                # search_area非0表示支持imdbid搜索
+                if (search_area and
+                        (not self.keyword or not self.keyword.startswith('tt'))):
+                    # 支持imdbid搜索，但关键字不是imdbid时，不启用imdbid搜索
+                    indexer_params.pop('search_area')
                 # 变量字典
                 inputs_dict = {
                     "keyword": search_word
                 }
-                # 查询参数
+                # 查询参数，默认查询标题
                 params = {
                     "search_mode": search_mode,
                     "search_area": 0,
@@ -279,7 +271,7 @@ class TorrentSpider:
                         # 解码为字符串
                         page_source = raw_data.decode(encoding)
                     except Exception as e:
-                        logger.debug(f"chardet解码失败：{e}")
+                        logger.debug(f"chardet解码失败：{str(e)}")
                         # 探测utf-8解码
                         if re.search(r"charset=\"?utf-8\"?", ret.text, re.IGNORECASE):
                             ret.encoding = "utf-8"
@@ -572,6 +564,29 @@ class TorrentSpider:
         else:
             self.torrents_info['labels'] = []
 
+    def __get_free_date(self, torrent):
+        # free date
+        if 'freedate' not in self.fields:
+            return
+        selector = self.fields.get('freedate', {})
+        freedate = torrent(selector.get('selector', '')).clone()
+        self.__remove(freedate, selector)
+        items = self.__attribute_or_text(freedate, selector)
+        self.torrents_info['freedate'] = self.__index(items, selector)
+        self.torrents_info['freedate'] = self.__filter_text(self.torrents_info.get('freedate'),
+                                                            selector.get('filters'))
+
+    def __get_hit_and_run(self, torrent):
+        # hitandrun
+        if 'hr' not in self.fields:
+            return
+        selector = self.fields.get('hr', {})
+        hit_and_run = torrent(selector.get('selector', ''))
+        if hit_and_run:
+            self.torrents_info['hit_and_run'] = True
+        else:
+            self.torrents_info['hit_and_run'] = False
+
     def get_info(self, torrent) -> dict:
         """
         解析单条种子数据
@@ -591,13 +606,15 @@ class TorrentSpider:
             self.__get_uploadvolumefactor(torrent)
             self.__get_pubdate(torrent)
             self.__get_date_elapsed(torrent)
+            self.__get_free_date(torrent)
             self.__get_labels(torrent)
+            self.__get_hit_and_run(torrent)
         except Exception as err:
             logger.error("%s 搜索出现错误：%s" % (self.indexername, str(err)))
         return self.torrents_info
 
     @staticmethod
-    def __filter_text(text, filters):
+    def __filter_text(text: str, filters: list):
         """
         对文件进行处理
         """
@@ -638,7 +655,7 @@ class TorrentSpider:
                 item.remove(v)
 
     @staticmethod
-    def __attribute_or_text(item, selector):
+    def __attribute_or_text(item, selector: dict):
         if not selector:
             return item
         if not item:
@@ -650,7 +667,7 @@ class TorrentSpider:
         return items
 
     @staticmethod
-    def __index(items, selector):
+    def __index(items: list, selector: dict):
         if not items:
             return None
         if selector:
@@ -686,4 +703,4 @@ class TorrentSpider:
             return self.torrents_info_array
         except Exception as err:
             self.is_error = True
-            logger.warn(f"错误：{self.indexername} {err}")
+            logger.warn(f"错误：{self.indexername} {str(err)}")

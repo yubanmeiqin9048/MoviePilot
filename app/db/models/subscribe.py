@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Sequence
 from sqlalchemy.orm import Session
 
-from app.db.models import Base
+from app.db import db_query, db_update, Base
 
 
 class Subscribe(Base):
@@ -37,6 +37,12 @@ class Subscribe(Base):
     include = Column(String)
     # 排除
     exclude = Column(String)
+    # 质量
+    quality = Column(String)
+    # 分辨率
+    resolution = Column(String)
+    # 特效
+    effect = Column(String)
     # 总集数
     total_episode = Column(Integer)
     # 开始集数
@@ -59,39 +65,58 @@ class Subscribe(Base):
     best_version = Column(Integer, default=0)
     # 当前优先级
     current_priority = Column(Integer)
+    # 保存路径
+    save_path = Column(String)
 
     @staticmethod
-    def exists(db: Session, tmdbid: int, season: int = None):
-        if season:
-            return db.query(Subscribe).filter(Subscribe.tmdbid == tmdbid,
-                                              Subscribe.season == season).first()
-        return db.query(Subscribe).filter(Subscribe.tmdbid == tmdbid).first()
+    @db_query
+    def exists(db: Session, tmdbid: int = None, doubanid: str = None, season: int = None):
+        if tmdbid:
+            if season:
+                return db.query(Subscribe).filter(Subscribe.tmdbid == tmdbid,
+                                                  Subscribe.season == season).first()
+            return db.query(Subscribe).filter(Subscribe.tmdbid == tmdbid).first()
+        elif doubanid:
+            return db.query(Subscribe).filter(Subscribe.doubanid == doubanid).first()
+        return None
 
     @staticmethod
+    @db_query
     def get_by_state(db: Session, state: str):
-        return db.query(Subscribe).filter(Subscribe.state == state).all()
+        result = db.query(Subscribe).filter(Subscribe.state == state).all()
+        return list(result)
 
     @staticmethod
+    @db_query
     def get_by_tmdbid(db: Session, tmdbid: int, season: int = None):
         if season:
-            return db.query(Subscribe).filter(Subscribe.tmdbid == tmdbid,
-                                              Subscribe.season == season).all()
-        return db.query(Subscribe).filter(Subscribe.tmdbid == tmdbid).all()
+            result = db.query(Subscribe).filter(Subscribe.tmdbid == tmdbid,
+                                                Subscribe.season == season).all()
+        else:
+            result = db.query(Subscribe).filter(Subscribe.tmdbid == tmdbid).all()
+        return list(result)
 
     @staticmethod
-    def get_by_title(db: Session, title: str):
+    @db_query
+    def get_by_title(db: Session, title: str, season: int = None):
+        if season:
+            return db.query(Subscribe).filter(Subscribe.name == title,
+                                              Subscribe.season == season).first()
         return db.query(Subscribe).filter(Subscribe.name == title).first()
 
     @staticmethod
+    @db_query
     def get_by_doubanid(db: Session, doubanid: str):
         return db.query(Subscribe).filter(Subscribe.doubanid == doubanid).first()
 
+    @db_update
     def delete_by_tmdbid(self, db: Session, tmdbid: int, season: int):
         subscrbies = self.get_by_tmdbid(db, tmdbid, season)
         for subscrbie in subscrbies:
             subscrbie.delete(db, subscrbie.id)
         return True
 
+    @db_update
     def delete_by_doubanid(self, db: Session, doubanid: str):
         subscribe = self.get_by_doubanid(db, doubanid)
         if subscribe:

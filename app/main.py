@@ -1,18 +1,33 @@
 import multiprocessing
+import os
+import sys
+import threading
 
 import uvicorn as uvicorn
+from PIL import Image
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from uvicorn import Config
 
-from app.command import Command
+from app.utils.system import SystemUtils
+
+# 禁用输出
+if SystemUtils.is_frozen():
+    sys.stdout = open(os.devnull, 'w')
+    sys.stderr = open(os.devnull, 'w')
+
 from app.core.config import settings
 from app.core.module import ModuleManager
 from app.core.plugin import PluginManager
-from app.db.init import init_db, update_db
+from app.db.init import init_db, update_db, init_super_user
+from app.helper.thread import ThreadHelper
 from app.helper.display import DisplayHelper
+from app.helper.resource import ResourceHelper
 from app.helper.sites import SitesHelper
+from app.helper.message import MessageHelper
 from app.scheduler import Scheduler
+from app.command import Command, CommandChian
+from app.schemas import Notification, NotificationType
 
 # App
 App = FastAPI(title=settings.PROJECT_NAME,
@@ -44,6 +59,103 @@ def init_routers():
     App.include_router(arr_router, prefix="/api/v3")
 
 
+def start_frontend():
+    """
+    启动前端服务
+    """
+    # 仅Windows可执行文件支持内嵌nginx
+    if not SystemUtils.is_frozen() \
+            or not SystemUtils.is_windows():
+        return
+    # 临时Nginx目录
+    nginx_path = settings.ROOT_PATH / 'nginx'
+    if not nginx_path.exists():
+        return
+    # 配置目录下的Nginx目录
+    run_nginx_dir = settings.CONFIG_PATH.with_name('nginx')
+    if not run_nginx_dir.exists():
+        # 移动到配置目录
+        SystemUtils.move(nginx_path, run_nginx_dir)
+    # 启动Nginx
+    import subprocess
+    subprocess.Popen("start nginx.exe",
+                     cwd=run_nginx_dir,
+                     shell=True)
+
+
+def stop_frontend():
+    """
+    停止前端服务
+    """
+    if not SystemUtils.is_frozen() \
+            or not SystemUtils.is_windows():
+        return
+    import subprocess
+    subprocess.Popen(f"taskkill /f /im nginx.exe", shell=True)
+
+
+def start_tray():
+    """
+    启动托盘图标
+    """
+
+    if not SystemUtils.is_frozen():
+        return
+
+    if not SystemUtils.is_windows():
+        return
+
+    def open_web():
+        """
+        调用浏览器打开前端页面
+        """
+        import webbrowser
+        webbrowser.open(f"http://localhost:{settings.NGINX_PORT}")
+
+    def quit_app():
+        """
+        退出程序
+        """
+        TrayIcon.stop()
+        Server.should_exit = True
+
+    import pystray
+
+    # 托盘图标
+    TrayIcon = pystray.Icon(
+        settings.PROJECT_NAME,
+        icon=Image.open(settings.ROOT_PATH / 'app.ico'),
+        menu=pystray.Menu(
+            pystray.MenuItem(
+                '打开',
+                open_web,
+            ),
+            pystray.MenuItem(
+                '退出',
+                quit_app,
+            )
+        )
+    )
+    # 启动托盘图标
+    threading.Thread(target=TrayIcon.run, daemon=True).start()
+
+
+def check_auth():
+    """
+    检查认证状态
+    """
+    if SitesHelper().auth_level < 2:
+        err_msg = "用户认证失败，站点相关功能将无法使用！"
+        MessageHelper().put(f"注意：{err_msg}")
+        CommandChian().post_message(
+            Notification(
+                mtype=NotificationType.Manual,
+                title="MoviePilot用户认证",
+                text=err_msg
+            )
+        )
+
+
 @App.on_event("shutdown")
 def shutdown_server():
     """
@@ -59,6 +171,10 @@ def shutdown_server():
     DisplayHelper().stop()
     # 停止定时服务
     Scheduler().stop()
+    # 停止线程池
+    ThreadHelper().shutdown()
+    # 停止前端服务
+    stop_frontend()
 
 
 @App.on_event("startup")
@@ -66,10 +182,14 @@ def start_module():
     """
     启动模块
     """
-    # 虚伪显示
+    # 初始化超级管理员
+    init_super_user()
+    # 虚拟显示
     DisplayHelper()
     # 站点管理
     SitesHelper()
+    # 资源包检测
+    ResourceHelper()
     # 加载模块
     ModuleManager()
     # 加载插件
@@ -80,12 +200,18 @@ def start_module():
     Command()
     # 初始化路由
     init_routers()
+    # 启动前端服务
+    start_frontend()
+    # 检查认证状态
+    check_auth()
 
 
 if __name__ == '__main__':
+    # 启动托盘
+    start_tray()
     # 初始化数据库
     init_db()
     # 更新数据库
     update_db()
-    # 启动服务
+    # 启动API服务
     Server.run()

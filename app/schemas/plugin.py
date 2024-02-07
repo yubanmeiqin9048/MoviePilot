@@ -14,8 +14,6 @@ class Plugin(BaseModel):
     plugin_desc: Optional[str] = None
     # 插件图标
     plugin_icon: Optional[str] = None
-    # 主题色
-    plugin_color: Optional[str] = None
     # 插件版本
     plugin_version: Optional[str] = None
     # 插件作者
@@ -34,3 +32,9 @@ class Plugin(BaseModel):
     state: Optional[bool] = False
     # 是否有详情页面
     has_page: Optional[bool] = False
+    # 是否有新版本
+    has_update: Optional[bool] = False
+    # 是否本地
+    is_local: Optional[bool] = False
+    # 仓库地址
+    repo_url: Optional[str] = None

@@ -1,7 +1,7 @@
 import json
 from typing import Any, Union
 
-from app.db import DbOper, SessionFactory
+from app.db import DbOper
 from app.db.models.systemconfig import SystemConfig
 from app.schemas.types import SystemConfigKey
 from app.utils.object import ObjectUtils
@@ -16,8 +16,7 @@ class SystemConfigOper(DbOper, metaclass=Singleton):
         """
         加载配置到内存
         """
-        self._db = SessionFactory()
-        super().__init__(self._db)
+        super().__init__()
         for item in SystemConfig.list(self._db):
             if ObjectUtils.is_obj(item.value):
                 self.__SYSTEMCONF[item.key] = json.loads(item.value)
@@ -56,6 +55,20 @@ class SystemConfigOper(DbOper, metaclass=Singleton):
         if not key:
             return self.__SYSTEMCONF
         return self.__SYSTEMCONF.get(key)
+
+    def delete(self, key: Union[str, SystemConfigKey]):
+        """
+        删除系统设置
+        """
+        if isinstance(key, SystemConfigKey):
+            key = key.value
+        # 更新内存
+        self.__SYSTEMCONF.pop(key, None)
+        # 写入数据库
+        conf = SystemConfig.get_by_key(self._db, key)
+        if conf:
+            conf.delete(self._db, conf.id)
+        return True
 
     def __del__(self):
         if self._db:
