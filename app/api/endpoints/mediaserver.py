@@ -59,7 +59,7 @@ def exists(title: str = None,
     )
     if exist:
         ret_info = {
-            "id": exist.item_id
+            "id": exist[0].item_id
         }
     """
     else:
