@@ -48,7 +48,7 @@ class EmbyModule(_ModuleBase):
         """
         return self.emby.get_webhook_message(form, args)
 
-    def media_exists(self, mediainfo: MediaInfo, itemid: List[str]) -> Optional[schemas.ExistMediaInfo]:
+    def media_exists(self, mediainfo: MediaInfo, itemid: List[str] = None) -> Optional[schemas.ExistMediaInfo]:
         """
         判断媒体文件是否存在
         :param mediainfo:  识别的媒体信息
@@ -73,21 +73,6 @@ class EmbyModule(_ModuleBase):
                 return None
             else:
                 logger.info(f"媒体库中已存在：{movies}")
-                return schemas.ExistMediaInfo(
-                    type=MediaType.MOVIE,
-                    server="emby",
-                    itemid=movies[0].item_id
-                )
-        else:
-            itemid, tvs = self.emby.get_tv_episodes(title=mediainfo.title,
-                                                    year=mediainfo.year,
-                                                    tmdb_id=mediainfo.tmdb_id,
-                                                    item_ids=itemid)
-            if not tvs:
-                logger.info(f"{mediainfo.title_year} 在媒体库中不存在")
-                return None
-            else:
-                logger.info(f"{mediainfo.title_year} 媒体库中已存在：{tvs}")
                 return schemas.ExistMediaInfo(
                     type=MediaType.MOVIE,
                     server="emby",
@@ -148,6 +133,7 @@ class EmbyModule(_ModuleBase):
         获取剧集信息
         """
         if server != "emby":
+            return None
         _, seasoninfo = self.emby.get_tv_episodes(item_ids=[item_id])
         if not seasoninfo:
             return []
