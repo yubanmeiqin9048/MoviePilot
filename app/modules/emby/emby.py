@@ -515,19 +515,10 @@ class Emby(metaclass=Singleton):
         if not item.title or not item.year or not item.type:
             return None
         if item.type != MediaType.MOVIE.value:
-            count = 0
-            item_ids = self.__get_emby_series_id_by_name(item.title)
-            if item_ids:
-                for itemid in item_ids:
-                    item_tmdbid = self.get_iteminfo(itemid).get("ProviderIds", {}).get("Tmdb")
-                    if str(item.tmdbid) == str(item_tmdbid):
-                        count = count + 1
-                # 总是刷新最新的媒体库
-                if count:
-                    return item_ids[count]
-                else:
-                    return None
-                
+            item_id = self.__get_emby_series_id_by_name(item.title, item.year)
+            if item_id:
+                # 存在电视剧，则直接刷新这个电视剧就行
+                return item_id
         else:
             if self.get_movies(item.title, item.year):
                 # 已存在，不用刷新
