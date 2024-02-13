@@ -279,7 +279,7 @@ class Emby(metaclass=Singleton):
             logger.error(f"连接Items/Counts出错：" + str(e))
             return schemas.Statistic()
 
-    def __get_emby_series_id_by_name(self, name: str, year: str) -> List[str]:
+    def __get_emby_series_id_by_name(self, name: str, year: str = None) -> List[str]:
         """
         根据名称查询Emby中剧集的SeriesId
         :param name: 标题
@@ -305,8 +305,7 @@ class Emby(metaclass=Singleton):
                 res_items = res.json().get("Items")
                 if res_items:
                     for res_item in res_items:
-                        if res_item.get('Name') == name and (
-                                not year or str(res_item.get('ProductionYear')) == str(year)):
+                        if res_item.get('Name') == name
                             item_ids.append(res_item.get('Id'))
         except Exception as e:
             logger.error(f"连接Items出错：" + str(e))
