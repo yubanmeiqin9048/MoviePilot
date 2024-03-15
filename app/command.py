@@ -267,7 +267,10 @@ class Command(metaclass=Singleton):
         停止事件处理线程
         """
         self._event.set()
-        self._thread.join()
+        try:
+            self._thread.join()
+        except Exception as e:
+            logger.error(f"停止事件处理线程出错：{str(e)} - {traceback.format_exc()}")
 
     def get_commands(self):
         """
@@ -315,8 +318,7 @@ class Command(metaclass=Singleton):
                 else:
                     logger.info(f"{command.get('description')} 执行完成")
             except Exception as err:
-                logger.error(f"执行命令 {cmd} 出错：{str(err)}")
-                traceback.print_exc()
+                logger.error(f"执行命令 {cmd} 出错：{str(err)} - {traceback.format_exc()}")
 
     @staticmethod
     def send_plugin_event(etype: EventType, data: dict) -> None:

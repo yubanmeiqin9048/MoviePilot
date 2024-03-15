@@ -8,10 +8,9 @@ from app.core.config import settings
 from app.log import logger
 from app.schemas import MediaType
 from app.utils.http import RequestUtils
-from app.utils.singleton import Singleton
 
 
-class Jellyfin(metaclass=Singleton):
+class Jellyfin:
 
     def __init__(self):
         self._host = settings.JELLYFIN_HOST
@@ -51,7 +50,7 @@ class Jellyfin(metaclass=Singleton):
         """
         if not self._host or not self._apikey:
             return []
-        req_url = "%Library/SelectableMediaFolders?api_key=%s" % (self._host, self._apikey)
+        req_url = "%sLibrary/SelectableMediaFolders?api_key=%s" % (self._host, self._apikey)
         try:
             res = RequestUtils().get_res(req_url)
             if res:
@@ -69,11 +68,11 @@ class Jellyfin(metaclass=Singleton):
         """
         if not self._host or not self._apikey:
             return []
-        req_url = "%sLibrary/VirtualFolders/Query?api_key=%s" % (self._host, self._apikey)
+        req_url = "%sLibrary/VirtualFolders?api_key=%s" % (self._host, self._apikey)
         try:
             res = RequestUtils().get_res(req_url)
             if res:
-                library_items = res.json().get("Items")
+                library_items = res.json()
                 librarys = []
                 for library_item in library_items:
                     library_name = library_item.get('Name')
@@ -92,10 +91,10 @@ class Jellyfin(metaclass=Singleton):
                         })
                 return librarys
             else:
-                logger.error(f"Library/VirtualFolders/Query 未获取到返回数据")
+                logger.error(f"Library/VirtualFolders 未获取到返回数据")
                 return []
         except Exception as e:
-            logger.error(f"连接Library/VirtualFolders/Query 出错：" + str(e))
+            logger.error(f"连接Library/VirtualFolders 出错：" + str(e))
             return []
 
     def __get_jellyfin_librarys(self, username: str = None) -> List[dict]:
@@ -423,19 +422,72 @@ class Jellyfin(metaclass=Singleton):
             return None
         req_url = "%sItems/%s/RemoteImages?api_key=%s" % (self._host, item_id, self._apikey)
         try:
-            res = RequestUtils().get_res(req_url)
+            res = RequestUtils(timeout=10).get_res(req_url)
             if res:
                 images = res.json().get("Images")
                 for image in images:
                     if image.get("ProviderName") == "TheMovieDb" and image.get("Type") == image_type:
                         return image.get("Url")
+                # return images[0].get("Url") # 首选无则返回第一张
             else:
-                logger.error(f"Items/RemoteImages 未获取到返回数据")
-                return None
+                logger.info(f"Items/RemoteImages 未获取到返回数据，采用本地图片")
+                return self.generate_image_link(item_id, image_type, True)
         except Exception as e:
             logger.error(f"连接Items/Id/RemoteImages出错：" + str(e))
             return None
         return None
+
+    def generate_image_link(self, item_id: str, image_type: str, host_type: bool) -> Optional[str]:
+        """
+        根据ItemId和imageType查询本地对应图片
+        :param item_id: 在Jellyfin中的ID
+        :param image_type: 图片类型，如Backdrop、Primary
+        :param host_type: True为外网链接, False为内网链接
+        :return: 图片对应在host_type的播放器中的URL
+        """
+        if not self._playhost:
+            logger.error("Jellyfin外网播放地址未能获取或为空")
+            return None
+        # 检测是否为TV
+        _parent_id = self.get_itemId_ancestors(item_id, 0, "ParentBackdropItemId")
+        if _parent_id:
+            item_id = _parent_id
+
+        _host = self._host
+        if host_type:
+            _host = self._playhost
+        req_url = "%sItems/%s/Images/%s" % (_host, item_id, image_type)
+        try:
+            res = RequestUtils().get_res(req_url)
+            if res and res.status_code != 404:
+                logger.info("影片图片链接:{}".format(res.url))
+                return res.url
+            else:
+                logger.error("Items/Id/Images 未获取到返回数据或无该影片{}图片".format(image_type))
+                return None
+        except Exception as e:
+            logger.error(f"连接Items/Id/Images出错：" + str(e))
+            return None
+
+    def get_itemId_ancestors(self, item_id: str, index: int, key: str) -> Optional[Union[str, list, int, dict, bool]]:
+        """
+        获得itemId的父item
+        :param item_id: 在Jellyfin中剧集的ID (S01E02的E02的item_id)
+        :param index: 第几个json对象
+        :param key: 需要得到父item中的键值对
+        :return key对应类型的值
+        """
+        req_url = "%sItems/%s/Ancestors?api_key=%s" % (self._host, item_id, self._apikey)
+        try:
+            res = RequestUtils().get_res(req_url)
+            if res:
+                return res.json()[index].get(key)
+            else:
+                logger.error(f"Items/Id/Ancestors 未获取到返回数据")
+                return None
+        except Exception as e:
+            logger.error(f"连接Items/Id/Ancestors出错：" + str(e))
+            return None
 
     def refresh_root_library(self) -> bool:
         """
@@ -633,9 +685,9 @@ class Jellyfin(metaclass=Singleton):
         """
         if not self._host or not self._apikey:
             return None
-        url = url.replace("[HOST]", self._host) \
-            .replace("[APIKEY]", self._apikey) \
-            .replace("[USER]", self.user)
+        url = url.replace("[HOST]", self._host or '') \
+            .replace("[APIKEY]", self._apikey or '') \
+            .replace("[USER]", self.user or '')
         try:
             return RequestUtils(accept_type="application/json").get_res(url=url)
         except Exception as e:
@@ -651,9 +703,9 @@ class Jellyfin(metaclass=Singleton):
         """
         if not self._host or not self._apikey:
             return None
-        url = url.replace("[HOST]", self._host) \
-            .replace("[APIKEY]", self._apikey) \
-            .replace("[USER]", self.user)
+        url = url.replace("[HOST]", self._host or '') \
+            .replace("[APIKEY]", self._apikey or '') \
+            .replace("[USER]", self.user or '')
         try:
             return RequestUtils(
                 headers=headers
@@ -731,6 +783,10 @@ class Jellyfin(metaclass=Singleton):
                                                         image_tag=item.get("BackdropImageTags")[0])
                     else:
                         image = self.__get_local_image_by_id(item.get("Id"))
+                    # 小部分剧集无[xxx-S01E01-thumb.jpg]图片
+                    image_res = RequestUtils().get_res(image)
+                    if not image_res or image_res.status_code == 404:
+                        image = self.generate_image_link(item.get("Id"), "Backdrop", False)
                     if item_type == MediaType.MOVIE.value:
                         title = item.get("Name")
                         subtitle = item.get("ProductionYear")

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseSettings
+from pydantic import BaseSettings, validator
 
 from app.utils.system import SystemUtils
 
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # 是否开发模式
     DEV: bool = False
     # 配置文件目录
-    CONFIG_DIR: str = None
+    CONFIG_DIR: Optional[str] = None
     # 超级管理员
     SUPERUSER: str = "admin"
     # API密钥，需要更换
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # 登录页面电影海报,tmdb/bing
     WALLPAPER: str = "tmdb"
     # 网络代理 IP:PORT
-    PROXY_HOST: str = None
+    PROXY_HOST: Optional[str] = None
     # 媒体识别来源 themoviedb/douban
     RECOGNIZE_SOURCE: str = "themoviedb"
     # 刮削来源 themoviedb/douban
@@ -68,7 +68,9 @@ class Settings(BaseSettings):
                           '.m4v', '.flv', '.m2ts', '.strm',
                           '.tp']
     # 支持的字幕文件后缀格式
-    RMT_SUBEXT: list = ['.srt', '.ass', '.ssa']
+    RMT_SUBEXT: list = ['.srt', '.ass', '.ssa', '.sup']
+    # 下载器临时文件后缀
+    DOWNLOAD_TMPEXT: list = ['.!qB', '.part']
     # 支持的音轨文件后缀格式
     RMT_AUDIO_TRACK_EXT: list = ['.mka']
     # 索引器
@@ -82,27 +84,27 @@ class Settings(BaseSettings):
     # 用户认证站点
     AUTH_SITE: str = ""
     # 交互搜索自动下载用户ID，使用,分割
-    AUTO_DOWNLOAD_USER: str = None
-    # 消息通知渠道 telegram/wechat/slack，多个通知渠道用,分隔
+    AUTO_DOWNLOAD_USER: Optional[str] = None
+    # 消息通知渠道 telegram/wechat/slack/synologychat/vocechat，多个通知渠道用,分隔
     MESSAGER: str = "telegram"
     # WeChat企业ID
-    WECHAT_CORPID: str = None
+    WECHAT_CORPID: Optional[str] = None
     # WeChat应用Secret
-    WECHAT_APP_SECRET: str = None
+    WECHAT_APP_SECRET: Optional[str] = None
     # WeChat应用ID
-    WECHAT_APP_ID: str = None
+    WECHAT_APP_ID: Optional[str] = None
     # WeChat代理服务器
     WECHAT_PROXY: str = "https://qyapi.weixin.qq.com"
     # WeChat Token
-    WECHAT_TOKEN: str = None
+    WECHAT_TOKEN: Optional[str] = None
     # WeChat EncodingAESKey
-    WECHAT_ENCODING_AESKEY: str = None
+    WECHAT_ENCODING_AESKEY: Optional[str] = None
     # WeChat 管理员
-    WECHAT_ADMINS: str = None
+    WECHAT_ADMINS: Optional[str] = None
     # Telegram Bot Token
-    TELEGRAM_TOKEN: str = None
+    TELEGRAM_TOKEN: Optional[str] = None
     # Telegram Chat ID
-    TELEGRAM_CHAT_ID: str = None
+    TELEGRAM_CHAT_ID: Optional[str] = None
     # Telegram 用户ID，使用,分隔
     TELEGRAM_USERS: str = ""
     # Telegram 管理员ID，使用,分隔
@@ -117,16 +119,22 @@ class Settings(BaseSettings):
     SYNOLOGYCHAT_WEBHOOK: str = ""
     # SynologyChat Token
     SYNOLOGYCHAT_TOKEN: str = ""
-    # 下载器 qbittorrent/transmission
+    # VoceChat地址
+    VOCECHAT_HOST: str = ""
+    # VoceChat ApiKey
+    VOCECHAT_API_KEY: str = ""
+    # VoceChat 频道ID
+    VOCECHAT_CHANNEL_ID: str = ""
+    # 下载器 qbittorrent/transmission，启用多个下载器时使用,分隔，只有第一个会被默认使用
     DOWNLOADER: str = "qbittorrent"
     # 下载器监控开关
     DOWNLOADER_MONITOR: bool = True
     # Qbittorrent地址，IP:PORT
-    QB_HOST: str = None
+    QB_HOST: Optional[str] = None
     # Qbittorrent用户名
-    QB_USER: str = None
+    QB_USER: Optional[str] = None
     # Qbittorrent密码
-    QB_PASSWORD: str = None
+    QB_PASSWORD: Optional[str] = None
     # Qbittorrent分类自动管理
     QB_CATEGORY: bool = False
     # Qbittorrent按顺序下载
@@ -134,21 +142,21 @@ class Settings(BaseSettings):
     # Qbittorrent忽略队列限制，强制继续
     QB_FORCE_RESUME: bool = False
     # Transmission地址，IP:PORT
-    TR_HOST: str = None
+    TR_HOST: Optional[str] = None
     # Transmission用户名
-    TR_USER: str = None
+    TR_USER: Optional[str] = None
     # Transmission密码
-    TR_PASSWORD: str = None
+    TR_PASSWORD: Optional[str] = None
     # 种子标签
     TORRENT_TAG: str = "MOVIEPILOT"
     # 下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_PATH: str = None
+    DOWNLOAD_PATH: Optional[str] = None
     # 电影下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_MOVIE_PATH: str = None
+    DOWNLOAD_MOVIE_PATH: Optional[str] = None
     # 电视剧下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_TV_PATH: str = None
+    DOWNLOAD_TV_PATH: Optional[str] = None
     # 动漫下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_ANIME_PATH: str = None
+    DOWNLOAD_ANIME_PATH: Optional[str] = None
     # 下载目录二级分类
     DOWNLOAD_CATEGORY: bool = False
     # 下载站点字幕
@@ -158,33 +166,33 @@ class Settings(BaseSettings):
     # 媒体服务器同步间隔（小时）
     MEDIASERVER_SYNC_INTERVAL: Optional[int] = 6
     # 媒体服务器同步黑名单，多个媒体库名称,分割
-    MEDIASERVER_SYNC_BLACKLIST: str = None
+    MEDIASERVER_SYNC_BLACKLIST: Optional[str] = None
     # EMBY服务器地址，IP:PORT
-    EMBY_HOST: str = None
+    EMBY_HOST: Optional[str] = None
     # EMBY外网地址，http(s)://DOMAIN:PORT，未设置时使用EMBY_HOST
-    EMBY_PLAY_HOST: str = None
+    EMBY_PLAY_HOST: Optional[str] = None
     # EMBY Api Key
-    EMBY_API_KEY: str = None
+    EMBY_API_KEY: Optional[str] = None
     # Jellyfin服务器地址，IP:PORT
-    JELLYFIN_HOST: str = None
+    JELLYFIN_HOST: Optional[str] = None
     # Jellyfin外网地址，http(s)://DOMAIN:PORT，未设置时使用JELLYFIN_HOST
-    JELLYFIN_PLAY_HOST: str = None
+    JELLYFIN_PLAY_HOST: Optional[str] = None
     # Jellyfin Api Key
-    JELLYFIN_API_KEY: str = None
+    JELLYFIN_API_KEY: Optional[str] = None
     # Plex服务器地址，IP:PORT
-    PLEX_HOST: str = None
+    PLEX_HOST: Optional[str] = None
     # Plex外网地址，http(s)://DOMAIN:PORT，未设置时使用PLEX_HOST
-    PLEX_PLAY_HOST: str = None
+    PLEX_PLAY_HOST: Optional[str] = None
     # Plex Token
-    PLEX_TOKEN: str = None
+    PLEX_TOKEN: Optional[str] = None
     # 转移方式 link/copy/move/softlink
     TRANSFER_TYPE: str = "copy"
     # CookieCloud服务器地址
     COOKIECLOUD_HOST: str = "https://movie-pilot.org/cookiecloud"
     # CookieCloud用户KEY
-    COOKIECLOUD_KEY: str = None
+    COOKIECLOUD_KEY: Optional[str] = None
     # CookieCloud端对端加密密码
-    COOKIECLOUD_PASSWORD: str = None
+    COOKIECLOUD_PASSWORD: Optional[str] = None
     # CookieCloud同步间隔（分钟）
     COOKIECLOUD_INTERVAL: Optional[int] = 60 * 24
     # OCR服务器地址
@@ -192,13 +200,13 @@ class Settings(BaseSettings):
     # CookieCloud对应的浏览器UA
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.57"
     # 媒体库目录，多个目录使用,分隔
-    LIBRARY_PATH: str = None
+    LIBRARY_PATH: Optional[str] = None
     # 电影媒体库目录名
     LIBRARY_MOVIE_NAME: str = "电影"
     # 电视剧媒体库目录名
     LIBRARY_TV_NAME: str = "电视剧"
     # 动漫媒体库目录名，不设置时使用电视剧目录
-    LIBRARY_ANIME_NAME: str = None
+    LIBRARY_ANIME_NAME: Optional[str] = None
     # 二级分类
     LIBRARY_CATEGORY: bool = True
     # 电视剧动漫的分类genre_ids
@@ -219,9 +227,24 @@ class Settings(BaseSettings):
     # 插件市场仓库地址，多个地址使用,分隔，地址以/结尾
     PLUGIN_MARKET: str = "https://github.com/jxxghp/MoviePilot-Plugins"
     # Github token，提高请求api限流阈值 ghp_****
-    GITHUB_TOKEN: str = None
+    GITHUB_TOKEN: Optional[str] = None
     # 自动检查和更新站点资源包（站点索引、认证等）
     AUTO_UPDATE_RESOURCE: bool = True
+    # 元数据识别缓存过期时间（小时）
+    META_CACHE_EXPIRE: int = 0
+
+    @validator("SUBSCRIBE_RSS_INTERVAL",
+               "COOKIECLOUD_INTERVAL",
+               "MEDIASERVER_SYNC_INTERVAL",
+               "META_CACHE_EXPIRE",
+               pre=True, always=True)
+    def convert_int(cls, value):
+        if not value:
+            return 0
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            raise ValueError(f"{value} 格式错误，不是有效数字！")
 
     @property
     def INNER_CONFIG_PATH(self):
@@ -262,7 +285,7 @@ class Settings(BaseSettings):
                 "torrents": 100,
                 "douban": 512,
                 "fanart": 512,
-                "meta": 15 * 24 * 3600
+                "meta": (self.META_CACHE_EXPIRE or 168) * 3600
             }
         return {
             "tmdb": 256,
@@ -270,7 +293,7 @@ class Settings(BaseSettings):
             "torrents": 50,
             "douban": 256,
             "fanart": 128,
-            "meta": 7 * 24 * 3600
+            "meta": (self.META_CACHE_EXPIRE or 72) * 3600
         }
 
     @property
@@ -341,6 +364,24 @@ class Settings(BaseSettings):
                 "Authorization": f"Bearer {self.GITHUB_TOKEN}"
             }
         return {}
+
+    @property
+    def DEFAULT_DOWNLOADER(self):
+        """
+        默认下载器
+        """
+        if not self.DOWNLOADER:
+            return None
+        return self.DOWNLOADER.split(",")[0]
+
+    @property
+    def DOWNLOADERS(self):
+        """
+        下载器列表
+        """
+        if not self.DOWNLOADER:
+            return []
+        return self.DOWNLOADER.split(",")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

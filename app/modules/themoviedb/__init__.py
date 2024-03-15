@@ -12,6 +12,7 @@ from app.modules.themoviedb.scraper import TmdbScraper
 from app.modules.themoviedb.tmdb_cache import TmdbCache
 from app.modules.themoviedb.tmdbapi import TmdbHelper
 from app.schemas.types import MediaType, MediaImageType
+from app.utils.http import RequestUtils
 from app.utils.system import SystemUtils
 
 
@@ -38,30 +39,54 @@ class TheMovieDbModule(_ModuleBase):
     def stop(self):
         self.cache.save()
 
+    def test(self) -> Tuple[bool, str]:
+        """
+        测试模块连接性
+        """
+        ret = RequestUtils(proxies=settings.PROXY).get_res(
+            f"https://{settings.TMDB_API_DOMAIN}/3/movie/550?api_key={settings.TMDB_API_KEY}")
+        if ret and ret.status_code == 200:
+            return True, ""
+        elif ret:
+            return False, f"无法连接 {settings.TMDB_API_DOMAIN}，错误码：{ret.status_code}"
+        return False, f"{settings.TMDB_API_DOMAIN} 网络连接失败"
+
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
     def recognize_media(self, meta: MetaBase = None,
                         mtype: MediaType = None,
                         tmdbid: int = None,
+                        cache: bool = True,
                         **kwargs) -> Optional[MediaInfo]:
         """
         识别媒体信息
         :param meta:     识别的元数据
         :param mtype:    识别的媒体类型，与tmdbid配套
         :param tmdbid:   tmdbid
+        :param cache:    是否使用缓存
         :return: 识别的媒体信息，包括剧集信息
         """
-        if settings.RECOGNIZE_SOURCE != "themoviedb":
+        if not tmdbid and not meta:
+            return None
+
+        if meta and not tmdbid \
+                and settings.RECOGNIZE_SOURCE != "themoviedb":
             return None
 
         if not meta:
             cache_info = {}
+        elif not meta.name:
+            logger.warn("识别媒体信息时未提供元数据名称")
+            return None
         else:
             if mtype:
                 meta.type = mtype
+            if tmdbid:
+                meta.tmdbid = tmdbid
+            # 读取缓存
             cache_info = self.cache.get(meta)
-        if not cache_info:
+        if not cache_info or not cache:
             # 缓存没有或者强制不使用缓存
             if tmdbid:
                 # 直接查询详情
@@ -161,7 +186,7 @@ class TheMovieDbModule(_ModuleBase):
         :param season:  季号
         """
         # 搜索
-        logger.info(f"开始使用 名称：{name}、年份：{year} 匹配TMDB信息 ...")
+        logger.info(f"开始使用 名称：{name} 年份：{year} 匹配TMDB信息 ...")
         info = self.tmdb.match(name=name,
                                year=year,
                                mtype=mtype,

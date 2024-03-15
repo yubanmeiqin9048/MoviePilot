@@ -67,6 +67,8 @@ class MediaInfo(BaseModel):
     type: Optional[str] = None
     # 媒体标题
     title: Optional[str] = None
+    # 英文标题
+    en_title: Optional[str] = None
     # 年份
     year: Optional[str] = None
     # 标题（年份）
@@ -92,7 +94,7 @@ class MediaInfo(BaseModel):
     # 海报图片
     poster_path: Optional[str] = None
     # 评分
-    vote_average: Optional[int] = 0
+    vote_average: Optional[float] = 0
     # 描述
     overview: Optional[str] = None
     # 二级分类

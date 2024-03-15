@@ -18,9 +18,11 @@ from app.db.models.subscribe import Subscribe
 from app.db.subscribe_oper import SubscribeOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.message import MessageHelper
+from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import NotExistMediaInfo, Notification
 from app.schemas.types import MediaType, SystemConfigKey, MessageChannel, NotificationType
+from app.utils.string import StringUtils
 
 
 class SubscribeChain(ChainBase):
@@ -37,6 +39,7 @@ class SubscribeChain(ChainBase):
         self.mediachain = MediaChain()
         self.message = MessageHelper()
         self.systemconfig = SystemConfigOper()
+        self.torrenthelper = TorrentHelper()
 
     def add(self, title: str, year: str,
             mtype: MediaType = None,
@@ -71,11 +74,11 @@ class SubscribeChain(ChainBase):
                 if tmdbinfo:
                     mediainfo = MediaInfo(tmdb_info=tmdbinfo)
             else:
-                # 识别TMDB信息
-                mediainfo = self.recognize_media(meta=metainfo, mtype=mtype, tmdbid=tmdbid)
+                # 识别TMDB信息，不使用缓存
+                mediainfo = self.recognize_media(meta=metainfo, mtype=mtype, tmdbid=tmdbid, cache=False)
         else:
-            # 豆瓣识别模式
-            mediainfo = self.recognize_media(meta=metainfo, mtype=mtype, doubanid=doubanid)
+            # 豆瓣识别模式，不使用缓存
+            mediainfo = self.recognize_media(meta=metainfo, mtype=mtype, doubanid=doubanid, cache=False)
             if mediainfo:
                 # 豆瓣标题处理
                 meta = MetaInfo(mediainfo.title)
@@ -96,7 +99,8 @@ class SubscribeChain(ChainBase):
                     # 补充媒体信息
                     mediainfo = self.recognize_media(mtype=mediainfo.type,
                                                      tmdbid=mediainfo.tmdb_id,
-                                                     doubanid=mediainfo.douban_id)
+                                                     doubanid=mediainfo.douban_id,
+                                                     cache=False)
                     if not mediainfo:
                         logger.error(f"媒体信息识别失败！")
                         return None, "媒体信息识别失败"
@@ -139,9 +143,8 @@ class SubscribeChain(ChainBase):
                 text = f"评分：{mediainfo.vote_average}，来自用户：{username or userid}"
             else:
                 text = f"评分：{mediainfo.vote_average}"
-            # 广而告之
-            self.post_message(Notification(channel=channel,
-                                           mtype=NotificationType.Subscribe,
+            # 群发
+            self.post_message(Notification(mtype=NotificationType.Subscribe,
                                            title=f"{mediainfo.title_year} {metainfo.season} 已添加订阅",
                                            text=text,
                                            image=mediainfo.get_message_image()))
@@ -197,7 +200,8 @@ class SubscribeChain(ChainBase):
             # 识别媒体信息
             mediainfo: MediaInfo = self.recognize_media(meta=meta, mtype=meta.type,
                                                         tmdbid=subscribe.tmdbid,
-                                                        doubanid=subscribe.doubanid)
+                                                        doubanid=subscribe.doubanid,
+                                                        cache=False)
             if not mediainfo:
                 logger.warn(
                     f'未识别到媒体信息，标题：{subscribe.name}，tmdbid：{subscribe.tmdbid}，doubanid：{subscribe.doubanid}')
@@ -257,10 +261,7 @@ class SubscribeChain(ChainBase):
                         logger.info(f'订阅 {mediainfo.title_year} {meta.season} 缺失集：{no_exists_info.episodes}')
 
             # 站点范围
-            if subscribe.sites:
-                sites = json.loads(subscribe.sites)
-            else:
-                sites = None
+            sites = self.get_sub_sites(subscribe)
 
             # 优先级过滤规则
             if subscribe.best_version:
@@ -277,7 +278,8 @@ class SubscribeChain(ChainBase):
                                                 no_exists=no_exists,
                                                 sites=sites,
                                                 priority_rule=priority_rule,
-                                                filter_rule=filter_rule)
+                                                filter_rule=filter_rule,
+                                                area="imdbid" if subscribe.search_imdbid else "title")
             if not contexts:
                 logger.warn(f'订阅 {subscribe.keyword or subscribe.name} 未搜索到资源')
                 self.finish_subscribe_or_not(subscribe=subscribe, meta=meta,
@@ -320,6 +322,7 @@ class SubscribeChain(ChainBase):
             downloads, lefts = self.downloadchain.batch_download(
                 contexts=matched_contexts,
                 no_exists=no_exists,
+                userid=subscribe.username,
                 username=subscribe.username,
                 save_path=subscribe.save_path
             )
@@ -416,6 +419,15 @@ class SubscribeChain(ChainBase):
             self.torrentschain.refresh(sites=sites)
         )
 
+    def get_sub_sites(self, subscribe: Subscribe) -> List[int]:
+        """
+        获取订阅中涉及的站点清单
+        """
+        if subscribe.sites:
+            return json.loads(subscribe.sites)
+        # 默认站点
+        return self.systemconfig.get(SystemConfigKey.RssSites) or []
+
     def get_subscribed_sites(self) -> Optional[List[int]]:
         """
         获取订阅中涉及的所有站点清单（节约资源）
@@ -428,13 +440,8 @@ class SubscribeChain(ChainBase):
         ret_sites = []
         # 刷新订阅选中的Rss站点
         for subscribe in subscribes:
-            # 如果有一个订阅没有选择站点，则刷新所有订阅站点
-            if not subscribe.sites:
-                return []
             # 刷新选中的站点
-            sub_sites = json.loads(subscribe.sites)
-            if sub_sites:
-                ret_sites.extend(sub_sites)
+            ret_sites.extend(self.get_sub_sites(subscribe))
         # 去重
         if ret_sites:
             ret_sites = list(set(ret_sites))
@@ -443,64 +450,20 @@ class SubscribeChain(ChainBase):
 
     def get_filter_rule(self, subscribe: Subscribe):
         """
-        获取订阅过滤规则，没有则返回默认规则
+        获取订阅过滤规则，同时组合默认规则
         """
         # 默认过滤规则
-        if (subscribe.include
-                or subscribe.exclude
-                or subscribe.quality
-                or subscribe.resolution
-                or subscribe.effect):
-            return {
-                "include": subscribe.include,
-                "exclude": subscribe.exclude,
-                "quality": subscribe.quality,
-                "resolution": subscribe.resolution,
-                "effect": subscribe.effect,
-            }
-        # 订阅默认过滤规则
-        return self.systemconfig.get(SystemConfigKey.DefaultFilterRules) or {}
-
-    @staticmethod
-    def check_filter_rule(torrent_info: TorrentInfo, filter_rule: Dict[str, str]) -> bool:
-        """
-        检查种子是否匹配订阅过滤规则
-        """
-        if not filter_rule:
-            return True
-        # 包含
-        include = filter_rule.get("include")
-        if include:
-            if not re.search(r"%s" % include,
-                             f"{torrent_info.title} {torrent_info.description}", re.I):
-                logger.info(f"{torrent_info.title} 不匹配包含规则 {include}")
-                return False
-        # 排除
-        exclude = filter_rule.get("exclude")
-        if exclude:
-            if re.search(r"%s" % exclude,
-                         f"{torrent_info.title} {torrent_info.description}", re.I):
-                logger.info(f"{torrent_info.title} 匹配排除规则 {exclude}")
-                return False
-        # 质量
-        quality = filter_rule.get("quality")
-        if quality:
-            if not re.search(r"%s" % quality, torrent_info.title, re.I):
-                logger.info(f"{torrent_info.title} 不匹配质量规则 {quality}")
-                return False
-        # 分辨率
-        resolution = filter_rule.get("resolution")
-        if resolution:
-            if not re.search(r"%s" % resolution, torrent_info.title, re.I):
-                logger.info(f"{torrent_info.title} 不匹配分辨率规则 {resolution}")
-                return False
-        # 特效
-        effect = filter_rule.get("effect")
-        if effect:
-            if not re.search(r"%s" % effect, torrent_info.title, re.I):
-                logger.info(f"{torrent_info.title} 不匹配特效规则 {effect}")
-                return False
-        return True
+        default_rule = self.systemconfig.get(SystemConfigKey.DefaultFilterRules) or {}
+        return {
+            "include": subscribe.include or default_rule.get("include"),
+            "exclude": subscribe.exclude or default_rule.get("exclude"),
+            "quality": subscribe.quality or default_rule.get("quality"),
+            "resolution": subscribe.resolution or default_rule.get("resolution"),
+            "effect": subscribe.effect or default_rule.get("effect"),
+            "tv_size": default_rule.get("tv_size"),
+            "movie_size": default_rule.get("movie_size"),
+            "min_seeders": default_rule.get("min_seeders"),
+        }
 
     def match(self, torrents: Dict[str, List[Context]]):
         """
@@ -523,7 +486,8 @@ class SubscribeChain(ChainBase):
             # 识别媒体信息
             mediainfo: MediaInfo = self.recognize_media(meta=meta, mtype=meta.type,
                                                         tmdbid=subscribe.tmdbid,
-                                                        doubanid=subscribe.doubanid)
+                                                        doubanid=subscribe.doubanid,
+                                                        cache=False)
             if not mediainfo:
                 logger.warn(
                     f'未识别到媒体信息，标题：{subscribe.name}，tmdbid：{subscribe.tmdbid}，doubanid：{subscribe.doubanid}')
@@ -587,15 +551,73 @@ class SubscribeChain(ChainBase):
             # 遍历缓存种子
             _match_context = []
             for domain, contexts in torrents.items():
+                logger.info(f'开始匹配站点：{domain}，共缓存了 {len(contexts)} 个种子...')
                 for context in contexts:
                     # 检查是否匹配
                     torrent_meta = context.meta_info
                     torrent_mediainfo = context.media_info
                     torrent_info = context.torrent_info
-                    # 比对TMDBID和类型
-                    if torrent_mediainfo.tmdb_id != mediainfo.tmdb_id \
-                            or torrent_mediainfo.type != mediainfo.type:
-                        continue
+
+                    # 如果识别了媒体信息，则比对TMDBID和类型
+                    if torrent_mediainfo.tmdb_id or torrent_mediainfo.douban_id:
+                        if torrent_mediainfo.type != mediainfo.type:
+                            continue
+                        if torrent_mediainfo.tmdb_id \
+                                and torrent_mediainfo.tmdb_id != mediainfo.tmdb_id:
+                            continue
+                        if torrent_mediainfo.douban_id \
+                                and torrent_mediainfo.douban_id != mediainfo.douban_id:
+                            continue
+                        logger.info(f'{mediainfo.title_year} 通过媒体信ID匹配到资源：{torrent_info.site_name} - {torrent_info.title}')
+                    else:
+                        # 按标题匹配
+                        # 比对种子识别类型
+                        if torrent_meta.type == MediaType.TV and mediainfo.type != MediaType.TV:
+                            continue
+                        # 比对种子在站点中的类型
+                        if torrent_info.category == MediaType.TV.value and mediainfo.type != MediaType.TV:
+                            continue
+                        # 比对年份
+                        if mediainfo.year:
+                            if mediainfo.type == MediaType.TV:
+                                # 剧集年份，每季的年份可能不同
+                                if torrent_meta.year and torrent_meta.year not in [year for year in
+                                                                                   mediainfo.season_years.values()]:
+                                    continue
+                            else:
+                                # 电影年份，上下浮动1年
+                                if torrent_meta.year not in [str(int(mediainfo.year) - 1),
+                                                             mediainfo.year,
+                                                             str(int(mediainfo.year) + 1)]:
+                                    continue
+                        # 标题匹配标志
+                        title_match = False
+                        # 比对标题和原语种标题
+                        meta_name = StringUtils.clear_upper(torrent_meta.name)
+                        if meta_name in [
+                            StringUtils.clear_upper(mediainfo.title),
+                            StringUtils.clear_upper(mediainfo.original_title)
+                        ]:
+                            title_match = True
+                        # 在副标题中判断是否存在标题与原语种标题
+                        if not title_match and torrent_info.description:
+                            subtitle = re.split(r'[\s/|]+', torrent_info.description)
+                            if (StringUtils.is_chinese(mediainfo.title)
+                                and str(mediainfo.title) in subtitle) \
+                                    or (StringUtils.is_chinese(mediainfo.original_title)
+                                        and str(mediainfo.original_title) in subtitle):
+                                title_match = True
+                        # 比对别名和译名
+                        if not title_match:
+                            for name in mediainfo.names:
+                                if StringUtils.clear_upper(name) == meta_name:
+                                    title_match = True
+                                    break
+                        if not title_match:
+                            continue
+                        # 标题匹配成功
+                        logger.info(f'{mediainfo.title_year} 通过名称匹配到资源：{torrent_info.site_name} - {torrent_info.title}')
+
                     # 优先级过滤规则
                     if subscribe.best_version:
                         priority_rule = self.systemconfig.get(SystemConfigKey.BestVersionFilterRules)
@@ -609,12 +631,13 @@ class SubscribeChain(ChainBase):
                         # 不符合过滤规则
                         logger.info(f"{torrent_info.title} 不匹配当前过滤规则")
                         continue
+
                     # 不在订阅站点范围的不处理
-                    if subscribe.sites:
-                        sub_sites = json.loads(subscribe.sites)
-                        if sub_sites and torrent_info.site not in sub_sites:
-                            logger.info(f"{torrent_info.title} 不符合 {torrent_mediainfo.title_year} 订阅站点要求")
-                            continue
+                    sub_sites = self.get_sub_sites(subscribe)
+                    if sub_sites and torrent_info.site not in sub_sites:
+                        logger.info(f"{torrent_info.site_name} - {torrent_info.title} 不符合订阅站点要求")
+                        continue
+
                     # 如果是电视剧
                     if torrent_mediainfo.type == MediaType.TV:
                         # 有多季的不要
@@ -658,8 +681,9 @@ class SubscribeChain(ChainBase):
                                     continue
 
                     # 过滤规则
-                    if not self.check_filter_rule(torrent_info=torrent_info,
-                                                  filter_rule=filter_rule):
+                    if not self.torrenthelper.filter_torrent(torrent_info=torrent_info,
+                                                             filter_rule=filter_rule,
+                                                             mediainfo=torrent_mediainfo):
                         continue
 
                     # 洗版时，优先级小于已下载优先级的不要
@@ -684,6 +708,7 @@ class SubscribeChain(ChainBase):
             logger.info(f'{mediainfo.title_year} 匹配完成，共匹配到{len(_match_context)}个资源')
             downloads, lefts = self.downloadchain.batch_download(contexts=_match_context,
                                                                  no_exists=no_exists,
+                                                                 userid=subscribe.username,
                                                                  username=subscribe.username,
                                                                  save_path=subscribe.save_path)
             # 判断是否要完成订阅
@@ -701,7 +726,7 @@ class SubscribeChain(ChainBase):
             return
         # 遍历订阅
         for subscribe in subscribes:
-            logger.info(f'开始检查订阅：{subscribe.name} ...')
+            logger.info(f'开始更新订阅元数据：{subscribe.name} ...')
             # 生成元数据
             meta = MetaInfo(subscribe.name)
             meta.year = subscribe.year
@@ -709,14 +734,16 @@ class SubscribeChain(ChainBase):
             meta.type = MediaType(subscribe.type)
             # 识别媒体信息
             mediainfo: MediaInfo = self.recognize_media(meta=meta, mtype=meta.type,
-                                                        tmdbid=subscribe.tmdbid, doubanid=subscribe.doubanid)
+                                                        tmdbid=subscribe.tmdbid,
+                                                        doubanid=subscribe.doubanid,
+                                                        cache=False)
             if not mediainfo:
                 logger.warn(
                     f'未识别到媒体信息，标题：{subscribe.name}，tmdbid：{subscribe.tmdbid}，doubanid：{subscribe.doubanid}')
                 continue
             # 对于电视剧，获取当前季的总集数
             episodes = mediainfo.seasons.get(subscribe.season) or []
-            if len(episodes) > (subscribe.total_episode or 0):
+            if not subscribe.manual_total_episode and len(episodes):
                 total_episode = len(episodes)
                 lack_episode = subscribe.lack_episode + (total_episode - subscribe.total_episode)
                 logger.info(
@@ -737,7 +764,7 @@ class SubscribeChain(ChainBase):
                 "total_episode": total_episode,
                 "lack_episode": lack_episode
             })
-            logger.info(f'订阅 {subscribe.name} 更新完成')
+            logger.info(f'{subscribe.name} 订阅元数据更新完成')
 
     def __update_subscribe_note(self, subscribe: Subscribe, downloads: List[Context]):
         """
@@ -832,20 +859,12 @@ class SubscribeChain(ChainBase):
         messages = []
         for subscribe in subscribes:
             if subscribe.type == MediaType.MOVIE.value:
-                if subscribe.tmdbid:
-                    link = f"https://www.themoviedb.org/movie/{subscribe.tmdbid}"
-                else:
-                    link = f"https://movie.douban.com/subject/{subscribe.doubanid}"
-                messages.append(f"{subscribe.id}. [{subscribe.name}（{subscribe.year}）]({link})")
+                messages.append(f"{subscribe.id}. {subscribe.name}（{subscribe.year}）")
             else:
-                if subscribe.tmdbid:
-                    link = f"https://www.themoviedb.org/tv/{subscribe.tmdbid}"
-                else:
-                    link = f"https://movie.douban.com/subject/{subscribe.doubanid}"
-                messages.append(f"{subscribe.id}. [{subscribe.name}（{subscribe.year}）]({link}) "
+                messages.append(f"{subscribe.id}. {subscribe.name}（{subscribe.year}）"
                                 f"第{subscribe.season}季 "
-                                f"_{subscribe.total_episode - (subscribe.lack_episode or subscribe.total_episode)}"
-                                f"/{subscribe.total_episode}_")
+                                f"[{subscribe.total_episode - (subscribe.lack_episode or subscribe.total_episode)}"
+                                f"/{subscribe.total_episode}]")
         # 发送列表
         self.post_message(Notification(channel=channel,
                                        title=title, text='\n'.join(messages), userid=userid))

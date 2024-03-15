@@ -1,3 +1,5 @@
+import time
+
 from sqlalchemy import Column, Integer, String, Sequence
 from sqlalchemy.orm import Session
 
@@ -67,6 +69,10 @@ class Subscribe(Base):
     current_priority = Column(Integer)
     # 保存路径
     save_path = Column(String)
+    # 是否使用 imdbid 搜索
+    search_imdbid = Column(Integer, default=0)
+    # 是否手动修改过总集数 0否 1是
+    manual_total_episode = Column(Integer, default=0)
 
     @staticmethod
     @db_query
@@ -122,3 +128,13 @@ class Subscribe(Base):
         if subscribe:
             subscribe.delete(db, subscribe.id)
         return True
+
+    @staticmethod
+    @db_query
+    def list_by_type(db: Session, mtype: str, days: int):
+        result = db.query(Subscribe) \
+            .filter(Subscribe.type == mtype,
+                    Subscribe.date >= time.strftime("%Y-%m-%d %H:%M:%S",
+                                                    time.localtime(time.time() - 86400 * int(days)))
+                    ).all()
+        return list(result)

@@ -54,6 +54,10 @@ def add_site(
     site_in.id = None
     site = Site(**site_in.dict())
     site.create(db)
+    # 通知缓存站点图标
+    EventManager().send_event(EventType.CacheSiteIcon, {
+        "domain": domain
+    })
     return schemas.Response(success=True)
 
 
@@ -71,6 +75,10 @@ def update_site(
     if not site:
         return schemas.Response(success=False, message="站点不存在")
     site.update(db, site_in.dict())
+    # 通知缓存站点图标
+    EventManager().send_event(EventType.CacheSiteIcon, {
+        "domain": site_in.domain
+    })
     return schemas.Response(success=True)
 
 
@@ -103,8 +111,8 @@ def cookie_cloud_sync(background_tasks: BackgroundTasks,
 
 
 @router.get("/reset", summary="重置站点", response_model=schemas.Response)
-def cookie_cloud_sync(db: Session = Depends(get_db),
-                      _: schemas.TokenPayload = Depends(verify_token)) -> Any:
+def reset(db: Session = Depends(get_db),
+          _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     清空所有站点数据并重新同步CookieCloud站点信息
     """
@@ -126,6 +134,7 @@ def update_cookie(
         site_id: int,
         username: str,
         password: str,
+        code: str = None,
         db: Session = Depends(get_db),
         _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
@@ -141,7 +150,8 @@ def update_cookie(
     # 更新Cookie
     state, message = SiteChain().update_cookie(site_info=site_info,
                                                username=username,
-                                               password=password)
+                                               password=password,
+                                               two_step_code=code)
     return schemas.Response(success=state, message=message)
 
 

@@ -27,6 +27,40 @@ class FileTransferModule(_ModuleBase):
     def stop(self):
         pass
 
+    def test(self) -> Tuple[bool, str]:
+        """
+        测试模块连接性
+        """
+        if not settings.DOWNLOAD_PATH:
+            return False, "下载目录未设置"
+        # 检查下载目录
+        download_paths: List[str] = []
+        for path in [settings.DOWNLOAD_PATH,
+                     settings.DOWNLOAD_MOVIE_PATH,
+                     settings.DOWNLOAD_TV_PATH,
+                     settings.DOWNLOAD_ANIME_PATH]:
+            if not path:
+                continue
+            download_path = Path(path)
+            if not download_path.exists():
+                return False, f"下载目录 {download_path} 不存在"
+            download_paths.append(path)
+        # 下载目录的设备ID
+        download_devids = [Path(path).stat().st_dev for path in download_paths]
+        # 检查媒体库目录
+        if not settings.LIBRARY_PATH:
+            return False, "媒体库目录未设置"
+        # 比较媒体库目录的设备ID
+        for path in settings.LIBRARY_PATHS:
+            library_path = Path(path)
+            if not library_path.exists():
+                return False, f"媒体库目录不存在：{library_path}"
+            if settings.DOWNLOADER_MONITOR and settings.TRANSFER_TYPE == "link":
+                if library_path.stat().st_dev not in download_devids:
+                    return False, f"媒体库目录 {library_path} " \
+                                  f"与下载目录 {','.join(download_paths)} 不在同一设备，将无法硬链接"
+        return True, ""
+
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
@@ -171,6 +205,8 @@ class FileTransferModule(_ModuleBase):
                 if (org_path.stem == Path(sub_file_name).stem) or \
                         (sub_metainfo.cn_name and sub_metainfo.cn_name == metainfo.cn_name) \
                         or (sub_metainfo.en_name and sub_metainfo.en_name == metainfo.en_name):
+                    if metainfo.part and metainfo.part != sub_metainfo.part:
+                        continue
                     if metainfo.season \
                             and metainfo.season != sub_metainfo.season:
                         continue
@@ -319,7 +355,7 @@ class FileTransferModule(_ModuleBase):
         :param transfer_type: RmtMode转移方式
         :param over_flag: 是否覆盖，为True时会先删除再转移
         """
-        if new_file.exists():
+        if new_file.exists() or new_file.is_symlink():
             if not over_flag:
                 logger.warn(f"文件已存在：{new_file}")
                 return 0
@@ -486,37 +522,46 @@ class FileTransferModule(_ModuleBase):
 
             # 判断是否要覆盖
             overflag = False
-            if new_file.exists():
-                # 目标文件已存在
-                logger.info(f"目标文件已存在，转移覆盖模式：{settings.OVERWRITE_MODE}")
-                match settings.OVERWRITE_MODE:
-                    case 'always':
-                        # 总是覆盖同名文件
+            target_file = new_file
+            if new_file.exists() or new_file.is_symlink():
+                if new_file.is_symlink():
+                    target_file = new_file.readlink()
+                    if not target_file.exists():
                         overflag = True
-                    case 'size':
-                        # 存在时大覆盖小
-                        if new_file.stat().st_size < in_path.stat().st_size:
-                            logger.info(f"目标文件文件大小更小，将被覆盖：{new_file}")
+                if not overflag:
+                    # 目标文件已存在
+                    logger.info(f"目标文件已存在，转移覆盖模式：{settings.OVERWRITE_MODE}")
+                    match settings.OVERWRITE_MODE:
+                        case 'always':
+                            # 总是覆盖同名文件
                             overflag = True
-                        else:
+                        case 'size':
+                            # 存在时大覆盖小
+                            if target_file.stat().st_size < in_path.stat().st_size:
+                                logger.info(f"目标文件文件大小更小，将覆盖：{new_file}")
+                                overflag = True
+                            else:
+                                return TransferInfo(success=False,
+                                                    message=f"媒体库中已存在，且质量更好",
+                                                    path=in_path,
+                                                    target_path=new_file,
+                                                    fail_list=[str(in_path)])
+                        case 'never':
+                            # 存在不覆盖
                             return TransferInfo(success=False,
-                                                message=f"媒体库中已存在，且质量更好",
+                                                message=f"媒体库中已存在，当前设置为不覆盖",
                                                 path=in_path,
                                                 target_path=new_file,
                                                 fail_list=[str(in_path)])
-                    case 'never':
-                        # 存在不覆盖
-                        return TransferInfo(success=False,
-                                            message=f"媒体库中已存在，当前设置为不覆盖",
-                                            path=in_path,
-                                            target_path=new_file,
-                                            fail_list=[str(in_path)])
-                    case 'latest':
-                        # 仅保留最新版本
-                        self.delete_all_version_files(new_file)
-                        overflag = True
-                    case _:
-                        pass
+                        case 'latest':
+                            # 仅保留最新版本
+                            logger.info(f"仅保留最新版本，将覆盖：{new_file}")
+                            overflag = True
+            else:
+                if settings.OVERWRITE_MODE == 'latest':
+                    # 文件不存在，但仅保留最新版本
+                    logger.info(f"转移覆盖模式：{settings.OVERWRITE_MODE}，仅保留最新版本")
+                    self.delete_all_version_files(new_file)
             # 原文件大小
             file_size = in_path.stat().st_size
             # 转移文件
@@ -552,6 +597,20 @@ class FileTransferModule(_ModuleBase):
         :param file_ext: 文件扩展名
         :param episodes_info: 当前季的全部集信息
         """
+
+        def __convert_invalid_characters(filename: str):
+            if not filename:
+                return filename
+            invalid_characters = r'\/:*?"<>|'
+            # 创建半角到全角字符的转换表
+            halfwidth_chars = "".join([chr(i) for i in range(33, 127)])
+            fullwidth_chars = "".join([chr(i + 0xFEE0) for i in range(33, 127)])
+            translation_table = str.maketrans(halfwidth_chars, fullwidth_chars)
+            # 将不支持的字符替换为对应的全角字符
+            for char in invalid_characters:
+                filename = filename.replace(char, char.translate(translation_table))
+            return filename
+
         # 获取集标题
         episode_title = None
         if meta.begin_episode and episodes_info:
@@ -562,9 +621,11 @@ class FileTransferModule(_ModuleBase):
 
         return {
             # 标题
-            "title": mediainfo.title,
+            "title": __convert_invalid_characters(mediainfo.title),
+            # 英文标题
+            "en_title": __convert_invalid_characters(mediainfo.en_title),
             # 原语种标题
-            "original_title": mediainfo.original_title,
+            "original_title": __convert_invalid_characters(mediainfo.original_title),
             # 原文件名
             "original_name": f"{meta.org_string}{file_ext}",
             # 识别名称（优先使用中文）

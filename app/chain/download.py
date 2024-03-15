@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple, Set, Dict, Union
 from app.chain import ChainBase
 from app.core.config import settings
 from app.core.context import MediaInfo, TorrentInfo, Context
+from app.core.event import eventmanager, Event
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
 from app.db.downloadhistory_oper import DownloadHistoryOper
@@ -211,7 +212,7 @@ class DownloadChain(ChainBase):
                     if _media.genre_ids \
                             and set(_media.genre_ids).intersection(set(settings.ANIME_GENREIDS)):
                         # 动漫
-                        download_dir = settings.SAVE_ANIME_PATH
+                        download_dir = settings.SAVE_ANIME_PATH / _media.category
                     else:
                         # 电视剧
                         download_dir = settings.SAVE_TV_PATH / _media.category
@@ -291,7 +292,7 @@ class DownloadChain(ChainBase):
                     continue
                 files_to_add.append({
                     "download_hash": _hash,
-                    "downloader": settings.DOWNLOADER,
+                    "downloader": settings.DEFAULT_DOWNLOADER,
                     "fullpath": str(download_dir / _folder_name / file),
                     "savepath": str(download_dir / _folder_name),
                     "filepath": file,
@@ -300,8 +301,8 @@ class DownloadChain(ChainBase):
             if files_to_add:
                 self.downloadhis.add_files(files_to_add)
 
-            # 发送消息
-            self.post_download_message(meta=_meta, mediainfo=_media, torrent=_torrent, channel=channel, userid=userid)
+            # 发送消息（群发，不带channel和userid）
+            self.post_download_message(meta=_meta, mediainfo=_media, torrent=_torrent)
             # 下载成功后处理
             self.download_added(context=context, download_dir=download_dir, torrent_path=torrent_file)
             # 广播事件
@@ -407,8 +408,8 @@ class DownloadChain(ChainBase):
         # 如果是电影，直接下载
         for context in contexts:
             if context.media_info.type == MediaType.MOVIE:
-                if self.download_single(context, save_path=save_path,
-                                        channel=channel, userid=userid, username=username):
+                if self.download_single(context, save_path=save_path, channel=channel,
+                                        userid=userid, username=username):
                     # 下载成功
                     downloaded_list.append(context)
 
@@ -481,8 +482,9 @@ class DownloadChain(ChainBase):
                                     )
                             else:
                                 # 下载
-                                download_id = self.download_single(context, save_path=save_path,
-                                                                   channel=channel, userid=userid, username=username)
+                                download_id = self.download_single(context,
+                                                                   save_path=save_path, channel=channel,
+                                                                   userid=userid, username=username)
 
                             if download_id:
                                 # 下载成功
@@ -544,8 +546,9 @@ class DownloadChain(ChainBase):
                             # 为需要集的子集则下载
                             if torrent_episodes.issubset(set(need_episodes)):
                                 # 下载
-                                download_id = self.download_single(context, save_path=save_path,
-                                                                   channel=channel, userid=userid, username=username)
+                                download_id = self.download_single(context,
+                                                                   save_path=save_path, channel=channel,
+                                                                   userid=userid, username=username)
                                 if download_id:
                                     # 下载成功
                                     downloaded_list.append(context)
@@ -820,6 +823,7 @@ class DownloadChain(ChainBase):
                 }
                 # 下载用户
                 torrent.userid = history.userid
+                torrent.username = history.username
             ret_torrents.append(torrent)
         return ret_torrents
 
@@ -838,3 +842,16 @@ class DownloadChain(ChainBase):
         删除下载任务
         """
         return self.remove_torrents(hashs=[hash_str])
+
+    @eventmanager.register(EventType.DownloadFileDeleted)
+    def download_file_deleted(self, event: Event):
+        """
+        下载文件删除时，同步删除下载任务
+        """
+        if not event:
+            return
+        hash_str = event.event_data.get("hash")
+        if not hash_str:
+            return
+        logger.warn(f"检测到下载源文件被删除，删除下载任务（不含文件）：{hash_str}")
+        self.remove_torrents(hashs=[hash_str], delete_file=False)

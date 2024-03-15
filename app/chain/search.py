@@ -1,8 +1,9 @@
 import pickle
 import re
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import Dict
 from typing import List, Optional
 
 from app.chain import ChainBase
@@ -74,7 +75,7 @@ class SearchChain(ChainBase):
         try:
             return pickle.loads(results)
         except Exception as e:
-            print(str(e))
+            logger.error(f'加载搜索结果失败：{str(e)} - {traceback.format_exc()}')
             return []
 
     def process(self, mediainfo: MediaInfo,
@@ -122,10 +123,13 @@ class SearchChain(ChainBase):
         # 搜索关键词
         if keyword:
             keywords = [keyword]
-        elif mediainfo.original_title and mediainfo.title != mediainfo.original_title:
-            keywords = [mediainfo.title, mediainfo.original_title]
         else:
-            keywords = [mediainfo.title]
+            # 去重去空，但要保持顺序
+            keywords = list(dict.fromkeys([k for k in [mediainfo.title,
+                                                       mediainfo.original_title,
+                                                       mediainfo.en_title,
+                                                       mediainfo.sg_title] if k]))
+
         # 执行搜索
         torrents: List[TorrentInfo] = self.__search_all_sites(
             mediainfo=mediainfo,
@@ -136,28 +140,8 @@ class SearchChain(ChainBase):
         if not torrents:
             logger.warn(f'{keyword or mediainfo.title} 未搜索到资源')
             return []
-        # 过滤种子
-        if priority_rule is None:
-            # 取搜索优先级规则
-            priority_rule = self.systemconfig.get(SystemConfigKey.SearchFilterRules)
-        if priority_rule:
-            logger.info(f'开始过滤资源，当前规则：{priority_rule} ...')
-            result: List[TorrentInfo] = self.filter_torrents(rule_string=priority_rule,
-                                                             torrent_list=torrents,
-                                                             season_episodes=season_episodes,
-                                                             mediainfo=mediainfo)
-            if result is not None:
-                torrents = result
-            if not torrents:
-                logger.warn(f'{keyword or mediainfo.title} 没有符合优先级规则的资源')
-                return []
-        # 使用过滤规则再次过滤
-        torrents = self.filter_torrents_by_rule(torrents=torrents,
-                                                mediainfo=mediainfo,
-                                                filter_rule=filter_rule)
-        if not torrents:
-            logger.warn(f'{keyword or mediainfo.title} 没有符合过滤规则的资源')
-            return []
+        # 开始新进度
+        self.progress.start(ProgressKey.Search)
         # 匹配的资源
         _match_torrents = []
         # 总数
@@ -165,28 +149,32 @@ class SearchChain(ChainBase):
         # 已处理数
         _count = 0
         if mediainfo:
-            self.progress.start(ProgressKey.Search)
-            logger.info(f'开始匹配，总 {_total} 个资源 ...')
+            # 英文标题应该在别名/原标题中，不需要再匹配
             logger.info(f"标题：{mediainfo.title}，原标题：{mediainfo.original_title}，别名：{mediainfo.names}")
             self.progress.update(value=0, text=f'开始匹配，总 {_total} 个资源 ...', key=ProgressKey.Search)
             for torrent in torrents:
                 _count += 1
-                self.progress.update(value=(_count / _total) * 100,
+                self.progress.update(value=(_count / _total) * 96,
                                      text=f'正在匹配 {torrent.site_name}，已完成 {_count} / {_total} ...',
                                      key=ProgressKey.Search)
                 # 比对IMDBID
                 if torrent.imdbid \
                         and mediainfo.imdb_id \
                         and torrent.imdbid == mediainfo.imdb_id:
-                    logger.info(f'{mediainfo.title} 匹配到资源：{torrent.site_name} - {torrent.title}')
+                    logger.info(f'{mediainfo.title} 通过IMDBID匹配到资源：{torrent.site_name} - {torrent.title}')
                     _match_torrents.append(torrent)
                     continue
                 # 识别
                 torrent_meta = MetaInfo(title=torrent.title, subtitle=torrent.description)
-                # 比对类型
-                if (torrent_meta.type == MediaType.TV and mediainfo.type != MediaType.TV) \
-                        or (torrent_meta.type != MediaType.TV and mediainfo.type == MediaType.TV):
-                    logger.warn(f'{torrent.site_name} - {torrent.title} 类型不匹配')
+                # 比对种子识别类型
+                if torrent_meta.type == MediaType.TV and mediainfo.type != MediaType.TV:
+                    logger.warn(f'{torrent.site_name} - {torrent.title} 种子标题类型为 {torrent_meta.type.value}，'
+                                f'需要是 {mediainfo.type.value}，不匹配')
+                    continue
+                # 比对种子在站点中的类型
+                if torrent.category == MediaType.TV.value and mediainfo.type != MediaType.TV:
+                    logger.warn(f'{torrent.site_name} - {torrent.title} 种子在站点中归类为 {torrent.category}，'
+                                f'需要是 {mediainfo.type.value}，不匹配')
                     continue
                 # 比对年份
                 if mediainfo.year:
@@ -231,21 +219,55 @@ class SearchChain(ChainBase):
                         break
                 else:
                     logger.warn(f'{torrent.site_name} - {torrent.title} 标题不匹配')
-            self.progress.update(value=100,
+            logger.info(f"匹配完成，共匹配到 {len(_match_torrents)} 个资源")
+            self.progress.update(value=97,
                                  text=f'匹配完成，共匹配到 {len(_match_torrents)} 个资源',
                                  key=ProgressKey.Search)
-            self.progress.end(ProgressKey.Search)
         else:
             _match_torrents = torrents
-        logger.info(f"匹配完成，共匹配到 {len(_match_torrents)} 个资源")
+        # 开始过滤
+        self.progress.update(value=98, text=f'开始过滤，总 {len(_match_torrents)} 个资源，请稍候...',
+                             key=ProgressKey.Search)
+        # 过滤种子
+        if priority_rule is None:
+            # 取搜索优先级规则
+            priority_rule = self.systemconfig.get(SystemConfigKey.SearchFilterRules)
+        if priority_rule:
+            logger.info(f'开始优先级规则过滤，当前规则：{priority_rule} ...')
+            result: List[TorrentInfo] = self.filter_torrents(rule_string=priority_rule,
+                                                             torrent_list=_match_torrents,
+                                                             season_episodes=season_episodes,
+                                                             mediainfo=mediainfo)
+            if result is not None:
+                _match_torrents = result
+            if not _match_torrents:
+                logger.warn(f'{keyword or mediainfo.title} 没有符合优先级规则的资源')
+                return []
+        # 使用过滤规则再次过滤
+        if filter_rule:
+            logger.info(f'开始过滤规则过滤，当前规则：{filter_rule} ...')
+            _match_torrents = self.filter_torrents_by_rule(torrents=_match_torrents,
+                                                           mediainfo=mediainfo,
+                                                           filter_rule=filter_rule)
+            if not _match_torrents:
+                logger.warn(f'{keyword or mediainfo.title} 没有符合过滤规则的资源')
+                return []
         # 去掉mediainfo中多余的数据
         mediainfo.clear()
         # 组装上下文
         contexts = [Context(meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
                             media_info=mediainfo,
                             torrent_info=torrent) for torrent in _match_torrents]
+
+        logger.info(f"过滤完成，剩余 {_total} 个资源")
+        self.progress.update(value=99, text=f'过滤完成，剩余 {_total} 个资源', key=ProgressKey.Search)
         # 排序
+        self.progress.update(value=100,
+                             text=f'正在对 {len(contexts)} 个资源进行排序，请稍候...',
+                             key=ProgressKey.Search)
         contexts = self.torrenthelper.sort_torrents(contexts)
+        # 结束进度
+        self.progress.end(ProgressKey.Search)
         # 返回
         return contexts
 
@@ -352,102 +374,13 @@ class SearchChain(ChainBase):
             filter_rule = self.systemconfig.get(SystemConfigKey.DefaultSearchFilterRules)
         if not filter_rule:
             return torrents
-        # 包含
-        include = filter_rule.get("include")
-        # 排除
-        exclude = filter_rule.get("exclude")
-        # 质量
-        quality = filter_rule.get("quality")
-        # 分辨率
-        resolution = filter_rule.get("resolution")
-        # 特效
-        effect = filter_rule.get("effect")
-        # 电影大小
-        movie_size = filter_rule.get("movie_size")
-        # 剧集单集大小
-        tv_size = filter_rule.get("tv_size")
-
-        def __get_size_range(size_str: str) -> Tuple[float, float]:
-            """
-            获取大小范围
-            """
-            if not size_str:
-                return 0, 0
-            try:
-                size_range = size_str.split("-")
-                if len(size_range) == 1:
-                    return 0, float(size_range[0])
-                elif len(size_range) == 2:
-                    return float(size_range[0]), float(size_range[1])
-            except Exception as e:
-                print(str(e))
-            return 0, 0
-
-        def __filter_torrent(t: TorrentInfo) -> bool:
-            """
-            过滤种子
-            """
-            # 包含
-            if include:
-                if not re.search(r"%s" % include,
-                                 f"{t.title} {t.description}", re.I):
-                    logger.info(f"{t.title} 不匹配包含规则 {include}")
-                    return False
-            # 排除
-            if exclude:
-                if re.search(r"%s" % exclude,
-                             f"{t.title} {t.description}", re.I):
-                    logger.info(f"{t.title} 匹配排除规则 {exclude}")
-                    return False
-            # 质量
-            if quality:
-                if not re.search(r"%s" % quality, t.title, re.I):
-                    logger.info(f"{t.title} 不匹配质量规则 {quality}")
-                    return False
-
-            # 分辨率
-            if resolution:
-                if not re.search(r"%s" % resolution, t.title, re.I):
-                    logger.info(f"{t.title} 不匹配分辨率规则 {resolution}")
-                    return False
-
-            # 特效
-            if effect:
-                if not re.search(r"%s" % effect, t.title, re.I):
-                    logger.info(f"{t.title} 不匹配特效规则 {effect}")
-                    return False
-
-            # 大小
-            if movie_size or tv_size:
-                if mediainfo.type == MediaType.TV:
-                    size = tv_size
-                else:
-                    size = movie_size
-                # 大小范围
-                begin_size, end_size = __get_size_range(size)
-                if begin_size is not None and end_size is not None:
-                    meta = MetaInfo(title=t.title, subtitle=t.description)
-                    # 集数
-                    if mediainfo.type == MediaType.TV:
-                        # 电视剧
-                        season = meta.begin_season or 1
-                        if meta.total_episode:
-                            # 识别的总集数
-                            episodes_num = meta.total_episode
-                        else:
-                            # 整季集数
-                            episodes_num = len(mediainfo.seasons.get(season) or [1])
-                        # 比较大小
-                        if not (begin_size * 1024 ** 3 <= (t.size / episodes_num) <= end_size * 1024 ** 3):
-                            logger.info(f"{t.title} {StringUtils.str_filesize(t.size)} "
-                                        f"共{episodes_num}集，不匹配大小规则 {size}")
-                            return False
-                    else:
-                        # 电影比较大小
-                        if not (begin_size * 1024 ** 3 <= t.size <= end_size * 1024 ** 3):
-                            logger.info(f"{t.title} {StringUtils.str_filesize(t.size)} 不匹配大小规则 {size}")
-                            return False
-            return True
 
         # 使用默认过滤规则再次过滤
-        return list(filter(lambda t: __filter_torrent(t), torrents))
+        return list(filter(
+            lambda t: self.torrenthelper.filter_torrent(
+                torrent_info=t,
+                filter_rule=filter_rule,
+                mediainfo=mediainfo
+            ),
+            torrents
+        ))

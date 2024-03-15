@@ -35,6 +35,13 @@ class _ModuleBase(metaclass=ABCMeta):
         """
         pass
 
+    @abstractmethod
+    def test(self) -> Tuple[bool, str]:
+        """
+        模块测试, 返回测试结果和错误信息
+        """
+        pass
+
 
 def checkMessage(channel_type: MessageChannel):
     """
@@ -59,6 +66,8 @@ def checkMessage(channel_type: MessageChannel):
                             if channel_type == MessageChannel.Slack and not switch.get("slack"):
                                 return None
                             if channel_type == MessageChannel.SynologyChat and not switch.get("synologychat"):
+                                return None
+                            if channel_type == MessageChannel.VoceChat and not switch.get("vocechat"):
                                 return None
                 return func(self, message, *args, **kwargs)
 

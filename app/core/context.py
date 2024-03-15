@@ -57,6 +57,8 @@ class TorrentInfo:
     labels: list = field(default_factory=list)
     # 种子优先级
     pri_order: int = 0
+    # 种子分类 电影/电视剧
+    category: str = None
 
     def __setattr__(self, name: str, value: Any):
         self.__dict__[name] = value
@@ -135,6 +137,10 @@ class MediaInfo:
     type: MediaType = None
     # 媒体标题
     title: str = None
+    # 英文标题
+    en_title: str = None
+    # 新加坡标题
+    sg_title: str = None
     # 年份
     year: str = None
     # 季
@@ -160,7 +166,7 @@ class MediaInfo:
     # LOGO
     logo_path: str = None
     # 评分
-    vote_average: int = 0
+    vote_average: float = 0
     # 描述
     overview: str = None
     # 风格ID
@@ -368,6 +374,10 @@ class MediaInfo:
         self.genre_ids = info.get('genre_ids') or []
         # 原语种
         self.original_language = info.get('original_language')
+        # 英文标题
+        self.en_title = info.get('en_title')
+        # 新加坡标题
+        self.sg_title = info.get('sg_title')
         if self.type == MediaType.MOVIE:
             # 标题
             self.title = info.get('title')
@@ -439,6 +449,9 @@ class MediaInfo:
         # 标题
         if not self.title:
             self.title = info.get("title")
+        # 英文标题，暂时不支持
+        if not self.en_title:
+            self.en_title = info.get('original_title')
         # 原语种标题
         if not self.original_title:
             self.original_title = info.get("original_title")

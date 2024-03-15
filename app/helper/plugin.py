@@ -1,11 +1,13 @@
 import json
 import shutil
+import traceback
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List
 
 from cachetools import TTLCache, cached
 
 from app.core.config import settings
+from app.log import logger
 from app.utils.http import RequestUtils
 from app.utils.singleton import Singleton
 from app.utils.system import SystemUtils
@@ -18,7 +20,7 @@ class PluginHelper(metaclass=Singleton):
 
     _base_url = "https://raw.githubusercontent.com/%s/%s/main/"
 
-    @cached(cache=TTLCache(maxsize=10, ttl=1800))
+    @cached(cache=TTLCache(maxsize=100, ttl=1800))
     def get_plugins(self, repo_url: str) -> Dict[str, dict]:
         """
         获取Github所有最新插件列表
@@ -33,7 +35,11 @@ class PluginHelper(metaclass=Singleton):
         res = RequestUtils(proxies=settings.PROXY, headers=settings.GITHUB_HEADERS,
                            timeout=10).get_res(f"{raw_url}package.json")
         if res:
-            return json.loads(res.text)
+            try:
+                return json.loads(res.text)
+            except json.JSONDecodeError:
+                logger.error(f"插件包数据解析失败：{res.text}")
+                return {}
         return {}
 
     @staticmethod
@@ -51,7 +57,7 @@ class PluginHelper(metaclass=Singleton):
         try:
             user, repo = repo_url.split("/")[-4:-2]
         except Exception as e:
-            print(str(e))
+            logger.error(f"解析Github仓库地址失败：{str(e)} - {traceback.format_exc()}")
             return None, None
         return user, repo
 

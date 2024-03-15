@@ -1,4 +1,5 @@
 import time
+import traceback
 from pathlib import Path
 from typing import Union
 from xml.dom import minidom
@@ -135,14 +136,15 @@ class TmdbScraper:
                                                        file_path=file_path)
                     # 集的图片
                     episode_image = episodeinfo.get("still_path")
-                    image_path = file_path.with_name(file_path.stem + "-thumb.jpg").with_suffix(
-                        Path(episode_image).suffix)
-                    if episode_image and (self._force_img or not image_path.exists()):
-                        self.__save_image(
-                            f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{episode_image}",
-                            image_path)
+                    if episode_image:
+                        image_path = file_path.with_name(file_path.stem + "-thumb.jpg").with_suffix(
+                            Path(episode_image).suffix)
+                        if self._force_img or not image_path.exists():
+                            self.__save_image(
+                                f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{episode_image}",
+                                image_path)
         except Exception as e:
-            logger.error(f"{file_path} 刮削失败：{str(e)}")
+            logger.error(f"{file_path} 刮削失败：{str(e)} - {traceback.format_exc()}")
 
     @staticmethod
     def __gen_common_nfo(mediainfo: MediaInfo, doc, root):
@@ -307,7 +309,7 @@ class TmdbScraper:
         # 添加时间
         DomUtils.add_node(doc, root, "dateadded", time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())))
         # TMDBID
-        uniqueid = DomUtils.add_node(doc, root, "uniqueid", str(tmdbid))
+        uniqueid = DomUtils.add_node(doc, root, "uniqueid", str(episodeinfo.get("id")))
         uniqueid.setAttribute("type", "tmdb")
         uniqueid.setAttribute("default", "true")
         # tmdbid
@@ -358,7 +360,7 @@ class TmdbScraper:
         """
         try:
             logger.info(f"正在下载{file_path.stem}图片：{url} ...")
-            r = RequestUtils().get_res(url=url, raise_exception=True)
+            r = RequestUtils(proxies=settings.PROXY).get_res(url=url, raise_exception=True)
             if r:
                 if self._transfer_type in ['rclone_move', 'rclone_copy']:
                     self.__save_remove_file(file_path, r.content)

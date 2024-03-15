@@ -4,12 +4,14 @@ from datetime import datetime
 from typing import Union, Any
 
 import tailer
+from dotenv import set_key
 from fastapi import APIRouter, HTTPException, Depends, Response
 from fastapi.responses import StreamingResponse
 
 from app import schemas
 from app.chain.search import SearchChain
 from app.core.config import settings
+from app.core.module import ModuleManager
 from app.core.security import verify_token
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.message import MessageHelper
@@ -46,7 +48,7 @@ def get_env_setting(_: schemas.TokenPayload = Depends(verify_token)):
     查询系统环境变量，包括当前版本号
     """
     info = settings.dict(
-        exclude={"SECRET_KEY", "SUPERUSER_PASSWORD", "API_TOKEN"}
+        exclude={"SECRET_KEY", "SUPERUSER_PASSWORD"}
     )
     info.update({
         "VERSION": APP_VERSION,
@@ -55,6 +57,27 @@ def get_env_setting(_: schemas.TokenPayload = Depends(verify_token)):
     })
     return schemas.Response(success=True,
                             data=info)
+
+
+@router.post("/env", summary="更新系统环境变量", response_model=schemas.Response)
+def set_env_setting(env: dict,
+                    _: schemas.TokenPayload = Depends(verify_token)):
+    """
+    更新系统环境变量
+    """
+    for k, v in env.items():
+        if k == "undefined":
+            continue
+        if hasattr(settings, k):
+            if v == "None":
+                v = None
+            setattr(settings, k, v)
+            if v is None:
+                v = ''
+            else:
+                v = str(v)
+            set_key(settings.CONFIG_PATH / "app.env", k, v)
+    return schemas.Response(success=True)
 
 
 @router.get("/progress/{process_type}", summary="实时进度")
@@ -85,23 +108,37 @@ def get_setting(key: str,
     """
     查询系统设置
     """
+    if hasattr(settings, key):
+        value = getattr(settings, key)
+    else:
+        value = SystemConfigOper().get(key)
     return schemas.Response(success=True, data={
-        "value": SystemConfigOper().get(key)
+        "value": value
     })
 
 
 @router.post("/setting/{key}", summary="更新系统设置", response_model=schemas.Response)
-def set_setting(key: str, value: Union[list, dict, str, int] = None,
+def set_setting(key: str, value: Union[list, dict, bool, int, str] = None,
                 _: schemas.TokenPayload = Depends(verify_token)):
     """
     更新系统设置
     """
-    SystemConfigOper().set(key, value)
+    if hasattr(settings, key):
+        if value == "None":
+            value = None
+        setattr(settings, key, value)
+        if value is None:
+            value = ''
+        else:
+            value = str(value)
+        set_key(settings.CONFIG_PATH / "app.env", key, value)
+    else:
+        SystemConfigOper().set(key, value)
     return schemas.Response(success=True)
 
 
 @router.get("/message", summary="实时消息")
-def get_message(token: str):
+def get_message(token: str, role: str = "sys"):
     """
     实时获取系统消息，返回格式为SSE
     """
@@ -115,7 +152,7 @@ def get_message(token: str):
 
     def event_generator():
         while True:
-            detail = message.get()
+            detail = message.get(role)
             yield 'data: %s\n\n' % (detail or '')
             time.sleep(3)
 
@@ -123,9 +160,11 @@ def get_message(token: str):
 
 
 @router.get("/logging", summary="实时日志")
-def get_logging(token: str):
+def get_logging(token: str, length: int = 50, logfile: str = "moviepilot.log"):
     """
-    实时获取系统日志，返回格式为SSE
+    实时获取系统日志
+    length = -1 时, 返回text/plain
+    否则 返回格式SSE
     """
     if not token or not verify_token(token):
         raise HTTPException(
@@ -133,45 +172,29 @@ def get_logging(token: str):
             detail="认证失败！",
         )
 
+    log_path = settings.LOG_PATH / logfile
+
     def log_generator():
-        log_path = settings.LOG_PATH / 'moviepilot.log'
         # 读取文件末尾50行，不使用tailer模块
         with open(log_path, 'r', encoding='utf-8') as f:
-            for line in f.readlines()[-50:]:
+            for line in f.readlines()[-max(length, 50):]:
                 yield 'data: %s\n\n' % line
         while True:
-            for text in tailer.follow(open(log_path, 'r', encoding='utf-8')):
-                yield 'data: %s\n\n' % (text or '')
+            for t in tailer.follow(open(log_path, 'r', encoding='utf-8')):
+                yield 'data: %s\n\n' % (t or '')
             time.sleep(1)
 
-    return StreamingResponse(log_generator(), media_type="text/event-stream")
-
-
-@router.get("/nettest", summary="测试网络连通性")
-def nettest(url: str,
-            proxy: bool,
-            _: schemas.TokenPayload = Depends(verify_token)):
-    """
-    测试网络连通性
-    """
-    # 记录开始的毫秒数
-    start_time = datetime.now()
-    url = url.replace("{TMDBAPIKEY}", settings.TMDB_API_KEY)
-    result = RequestUtils(proxies=settings.PROXY if proxy else None,
-                          ua=settings.USER_AGENT).get_res(url)
-    # 计时结束的毫秒数
-    end_time = datetime.now()
-    # 计算相关秒数
-    if result and result.status_code == 200:
-        return schemas.Response(success=True, data={
-            "time": round((end_time - start_time).microseconds / 1000)
-        })
-    elif result:
-        return schemas.Response(success=False, message=f"错误码：{result.status_code}", data={
-            "time": round((end_time - start_time).microseconds / 1000)
-        })
+    # 根据length参数返回不同的响应
+    if length == -1:
+        # 返回全部日志作为文本响应
+        if not log_path.exists():
+            return Response(content="日志文件不存在！", media_type="text/plain")
+        with open(log_path, 'r', encoding='utf-8') as file:
+            text = file.read()
+        return Response(content=text, media_type="text/plain")
     else:
-        return schemas.Response(success=False, message="网络连接失败！")
+        # 返回SSE流响应
+        return StreamingResponse(log_generator(), media_type="text/event-stream")
 
 
 @router.get("/versions", summary="查询Github所有Release版本", response_model=schemas.Response)
@@ -219,6 +242,53 @@ def ruletest(title: str,
     })
 
 
+@router.get("/nettest", summary="测试网络连通性")
+def nettest(url: str,
+            proxy: bool,
+            _: schemas.TokenPayload = Depends(verify_token)):
+    """
+    测试网络连通性
+    """
+    # 记录开始的毫秒数
+    start_time = datetime.now()
+    url = url.replace("{TMDBAPIKEY}", settings.TMDB_API_KEY)
+    result = RequestUtils(proxies=settings.PROXY if proxy else None,
+                          ua=settings.USER_AGENT).get_res(url)
+    # 计时结束的毫秒数
+    end_time = datetime.now()
+    # 计算相关秒数
+    if result and result.status_code == 200:
+        return schemas.Response(success=True, data={
+            "time": round((end_time - start_time).microseconds / 1000)
+        })
+    elif result:
+        return schemas.Response(success=False, message=f"错误码：{result.status_code}", data={
+            "time": round((end_time - start_time).microseconds / 1000)
+        })
+    else:
+        return schemas.Response(success=False, message="网络连接失败！")
+
+
+@router.get("/modulelist", summary="查询已加载的模块ID列表", response_model=schemas.Response)
+def modulelist(_: schemas.TokenPayload = Depends(verify_token)):
+    """
+    查询已加载的模块ID列表
+    """
+    module_ids = [module.__name__ for module in ModuleManager().get_modules("test")]
+    return schemas.Response(success=True, data={
+        "ids": module_ids
+    })
+
+
+@router.get("/moduletest/{moduleid}", summary="模块可用性测试", response_model=schemas.Response)
+def moduletest(moduleid: str, _: schemas.TokenPayload = Depends(verify_token)):
+    """
+    模块可用性测试接口
+    """
+    state, errmsg = ModuleManager().test(moduleid)
+    return schemas.Response(success=state, message=errmsg)
+
+
 @router.get("/restart", summary="重启系统", response_model=schemas.Response)
 def restart_system(_: schemas.TokenPayload = Depends(verify_token)):
     """
@@ -229,6 +299,16 @@ def restart_system(_: schemas.TokenPayload = Depends(verify_token)):
     # 执行重启
     ret, msg = SystemUtils.restart()
     return schemas.Response(success=ret, message=msg)
+
+
+@router.get("/reload", summary="重新加载模块", response_model=schemas.Response)
+def reload_module(_: schemas.TokenPayload = Depends(verify_token)):
+    """
+    重新加载模块
+    """
+    ModuleManager().reload()
+    Scheduler().init()
+    return schemas.Response(success=True)
 
 
 @router.get("/runscheduler", summary="运行服务", response_model=schemas.Response)

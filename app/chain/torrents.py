@@ -1,4 +1,5 @@
 import re
+import traceback
 from typing import Dict, List, Union
 
 from cachetools import cached, TTLCache
@@ -15,7 +16,7 @@ from app.helper.sites import SitesHelper
 from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import Notification
-from app.schemas.types import SystemConfigKey, MessageChannel, NotificationType
+from app.schemas.types import SystemConfigKey, MessageChannel, NotificationType, MediaType
 from app.utils.singleton import Singleton
 from app.utils.string import StringUtils
 
@@ -98,7 +99,7 @@ class TorrentsChain(ChainBase, metaclass=Singleton):
         if not site.get("rss"):
             logger.error(f'站点 {domain} 未配置RSS地址！')
             return []
-        rss_items = self.rsshelper.parse(site.get("rss"), True if site.get("proxy") else False)
+        rss_items = self.rsshelper.parse(site.get("rss"), True if site.get("proxy") else False, timeout=int(site.get("timeout") or 30))
         if rss_items is None:
             # rss过期，尝试保留原配置生成新的rss
             self.__renew_rss_url(domain=domain, site=site)
@@ -183,6 +184,10 @@ class TorrentsChain(ChainBase, metaclass=Singleton):
                     logger.info(f'处理资源：{torrent.title} ...')
                     # 识别
                     meta = MetaInfo(title=torrent.title, subtitle=torrent.description)
+                    # 使用站点种子分类，校正类型识别
+                    if meta.type != MediaType.TV \
+                            and torrent.category == MediaType.TV.value:
+                        meta.type = MediaType.TV
                     # 识别媒体信息
                     mediainfo: MediaInfo = self.mediachain.recognize_by_meta(meta)
                     if not mediainfo:
@@ -246,5 +251,5 @@ class TorrentsChain(ChainBase, metaclass=Singleton):
                 self.post_message(
                     Notification(mtype=NotificationType.SiteMessage, title=f"站点 {domain} RSS链接已过期"))
         except Exception as e:
-            print(str(e))
+            logger.error(f"站点 {domain} RSS链接自动获取失败：{str(e)} - {traceback.format_exc()}")
             self.post_message(Notification(mtype=NotificationType.SiteMessage, title=f"站点 {domain} RSS链接已过期"))

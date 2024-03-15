@@ -72,9 +72,12 @@ class PluginManager(metaclass=Singleton):
                 plugin_obj.init_plugin(self.get_plugin_config(plugin_id))
                 # 存储运行实例
                 self._running_plugins[plugin_id] = plugin_obj
-                logger.info(f"Plugin Loaded：{plugin_id}")
-                # 设置事件注册状态可用
-                eventmanager.enable_events_hander(plugin_id)
+                logger.info(f"加载插件：{plugin_id} 版本：{plugin_obj.plugin_version}")
+                # 启用的插件才设置事件注册状态可用
+                if plugin_obj.get_state():
+                    eventmanager.enable_events_hander(plugin_id)
+                else:
+                    eventmanager.disable_events_hander(plugin_id)
             except Exception as err:
                 logger.error(f"加载插件 {plugin_id} 出错：{str(err)} - {traceback.format_exc()}")
 
@@ -85,6 +88,12 @@ class PluginManager(metaclass=Singleton):
         if not self._running_plugins.get(plugin_id):
             return
         self._running_plugins[plugin_id].init_plugin(conf)
+        if self._running_plugins[plugin_id].get_state():
+            # 设置启用的插件事件注册状态可用
+            eventmanager.enable_events_hander(plugin_id)
+        else:
+            # 设置事件状态为不可用
+            eventmanager.disable_events_hander(plugin_id)
 
     def stop(self):
         """
@@ -137,7 +146,11 @@ class PluginManager(metaclass=Singleton):
         """
         if not self._plugins.get(pid):
             return {}
-        return self.systemconfig.get(self._config_key % pid) or {}
+        conf = self.systemconfig.get(self._config_key % pid)
+        if conf:
+            # 去掉空Key
+            return {k: v for k, v in conf.items() if k}
+        return {}
 
     def save_plugin_config(self, pid: str, conf: dict) -> bool:
         """
@@ -233,6 +246,16 @@ class PluginManager(metaclass=Singleton):
                     ret_services.extend(services)
         return ret_services
 
+    def get_plugin_attr(self, pid: str, attr: str) -> Any:
+        """
+        获取插件属性
+        """
+        if not self._running_plugins.get(pid):
+            return None
+        if not hasattr(self._running_plugins[pid], attr):
+            return None
+        return getattr(self._running_plugins[pid], attr)
+
     def run_plugin_method(self, pid: str, method: str, *args, **kwargs) -> Any:
         """
         运行插件方法
@@ -248,6 +271,12 @@ class PluginManager(metaclass=Singleton):
         获取所有插件ID
         """
         return list(self._plugins.keys())
+
+    def get_running_plugin_ids(self) -> List[str]:
+        """
+        获取所有运行态插件ID
+        """
+        return list(self._running_plugins.keys())
 
     def get_online_plugins(self) -> List[dict]:
         """

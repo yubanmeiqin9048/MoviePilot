@@ -40,6 +40,8 @@ class EventType(Enum):
     NameRecognize = "name.recognize"
     # 名称识别结果
     NameRecognizeResult = "name.recognize.result"
+    # 缓存站点图标
+    CacheSiteIcon = "cache.siteicon"
 
 
 # 系统配置Key字典
@@ -114,3 +116,5 @@ class MessageChannel(Enum):
     Telegram = "Telegram"
     Slack = "Slack"
     SynologyChat = "SynologyChat"
+    VoceChat = "VoceChat"
+    Web = "Web"
