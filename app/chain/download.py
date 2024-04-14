@@ -34,14 +34,19 @@ class DownloadChain(ChainBase):
         self.mediaserver = MediaServerOper()
 
     def post_download_message(self, meta: MetaBase, mediainfo: MediaInfo, torrent: TorrentInfo,
-                              channel: MessageChannel = None,
-                              userid: str = None):
+                              channel: MessageChannel = None, userid: str = None, username: str = None):
         """
         发送添加下载的消息
+        :param meta: 元数据
+        :param mediainfo: 媒体信息
+        :param torrent: 种子信息
+        :param channel: 通知渠道
+        :param userid: 用户ID，指定时精确发送对应用户
+        :param username: 通知显示的下载用户信息
         """
         msg_text = ""
-        if userid:
-            msg_text = f"用户：{userid}"
+        if username:
+            msg_text = f"用户：{username}"
         if torrent.site_name:
             msg_text = f"{msg_text}\n站点：{torrent.site_name}"
         if meta.resource_term:
@@ -73,6 +78,7 @@ class DownloadChain(ChainBase):
         self.post_message(Notification(
             channel=channel,
             mtype=NotificationType.Download,
+            userid=userid,
             title=f"{mediainfo.title_year} "
                   f"{meta.season_episode} 开始下载",
             text=msg_text,
@@ -103,17 +109,27 @@ class DownloadChain(ChainBase):
                 # 解码参数
                 req_str = base64.b64decode(base64_str.encode('utf-8')).decode('utf-8')
                 req_params: Dict[str, dict] = json.loads(req_str)
+                # 是否使用cookie
+                if not req_params.get('cookie'):
+                    cookie = None
+                # 请求头
+                if req_params.get('header'):
+                    headers = req_params.get('header')
+                else:
+                    headers = None
                 if req_params.get('method') == 'get':
                     # GET请求
                     res = RequestUtils(
                         ua=ua,
-                        cookies=cookie
+                        cookies=cookie,
+                        headers=headers
                     ).get_res(url, params=req_params.get('params'))
                 else:
                     # POST请求
                     res = RequestUtils(
                         ua=ua,
-                        cookies=cookie
+                        cookies=cookie,
+                        headers=headers
                     ).post_res(url, params=req_params.get('params'))
                 if not res:
                     return None
@@ -134,12 +150,15 @@ class DownloadChain(ChainBase):
             return None, "", []
         if torrent.enclosure.startswith("magnet:"):
             return torrent.enclosure, "", []
-
+        # Cookie
+        site_cookie = torrent.site_cookie
         if torrent.enclosure.startswith("["):
             # 需要解码获取下载地址
             torrent_url = __get_redict_url(url=torrent.enclosure,
                                            ua=torrent.site_ua,
-                                           cookie=torrent.site_cookie)
+                                           cookie=site_cookie)
+            # 涉及解析地址的不使用Cookie下载种子，否则MT会出错
+            site_cookie = None
         else:
             torrent_url = torrent.enclosure
         if not torrent_url:
@@ -148,7 +167,7 @@ class DownloadChain(ChainBase):
         # 下载种子文件
         torrent_file, content, download_folder, files, error_msg = self.torrent.download_torrent(
             url=torrent_url,
-            cookie=torrent.site_cookie,
+            cookie=site_cookie,
             ua=torrent.site_ua,
             proxy=torrent.site_proxy)
 
@@ -302,18 +321,20 @@ class DownloadChain(ChainBase):
                 self.downloadhis.add_files(files_to_add)
 
             # 发送消息（群发，不带channel和userid）
-            self.post_download_message(meta=_meta, mediainfo=_media, torrent=_torrent)
+            self.post_download_message(meta=_meta, mediainfo=_media, torrent=_torrent, username=username)
             # 下载成功后处理
             self.download_added(context=context, download_dir=download_dir, torrent_path=torrent_file)
             # 广播事件
             self.eventmanager.send_event(EventType.DownloadAdded, {
                 "hash": _hash,
-                "context": context
+                "context": context,
+                "username": username
             })
         else:
             # 下载失败
             logger.error(f"{_media.title_year} 添加下载任务失败："
                          f"{_torrent.title} - {_torrent.enclosure}，{error_msg}")
+            # 只发送给对应渠道和用户
             self.post_message(Notification(
                 channel=channel,
                 mtype=NotificationType.Manual,

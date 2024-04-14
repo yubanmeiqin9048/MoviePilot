@@ -283,6 +283,18 @@ class StringUtils:
         return netloc[0]
 
     @staticmethod
+    def get_url_host(url: str) -> str:
+        """
+        获取URL的一级域名
+        """
+        if not url:
+            return ""
+        _, netloc = StringUtils.get_url_netloc(url)
+        if not netloc:
+            return ""
+        return netloc.split(".")[-2]
+
+    @staticmethod
     def get_base_url(url: str) -> str:
         """
         获取URL根地址
@@ -588,6 +600,8 @@ class StringUtils:
             # 处理不希望包含多个冒号的情况（除了协议后的冒号）
             return None, None
         domain = ":".join(parts[:-1])
+        if domain.endswith("/"):
+            domain = domain[:-1]
         # 检查是否包含端口号
         try:
             port = int(parts[-1])

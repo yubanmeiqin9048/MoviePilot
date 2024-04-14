@@ -223,6 +223,8 @@ class TransferChain(ChainBase):
                 # 合并季
                 if season is not None:
                     file_meta.begin_season = season
+                elif file_meta.begin_season is None:
+                    file_meta.begin_season = 1
 
                 if not file_meta:
                     logger.error(f"{file_path} 无法识别有效信息")
@@ -278,8 +280,11 @@ class TransferChain(ChainBase):
 
                 # 获取集数据
                 if file_mediainfo.type == MediaType.TV:
-                    episodes_info = self.tmdbchain.tmdb_episodes(tmdbid=file_mediainfo.tmdb_id,
-                                                                 season=file_meta.begin_season or 1)
+                    file_mediainfo.season = file_mediainfo.season or file_meta.begin_season
+                    episodes_info = self.tmdbchain.tmdb_episodes(
+                        tmdbid=file_mediainfo.tmdb_id,
+                        season=file_mediainfo.season
+                    )
                 else:
                     episodes_info = None
 
@@ -355,7 +360,8 @@ class TransferChain(ChainBase):
                 if settings.SCRAP_METADATA:
                     self.scrape_metadata(path=transferinfo.target_path,
                                          mediainfo=file_mediainfo,
-                                         transfer_type=transfer_type)
+                                         transfer_type=transfer_type,
+                                         metainfo=file_meta)
                 # 更新进度
                 processed_num += 1
                 self.progress.update(value=processed_num / total_num * 100,

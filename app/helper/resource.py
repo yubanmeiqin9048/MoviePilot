@@ -55,11 +55,7 @@ class ResourceHelper(metaclass=Singleton):
             target = resource.get("target")
             version = resource.get("version")
             # 判断平台
-            if platform and platform != SystemUtils.platform:
-                continue
-            # 判断本地是否存在
-            local_path = self._base_dir / target / rname
-            if not local_path.exists():
+            if platform and platform != SystemUtils.platform():
                 continue
             # 判断版本号
             if rtype == "auth":
@@ -80,8 +76,10 @@ class ResourceHelper(metaclass=Singleton):
             # 下载文件信息列表
             r = RequestUtils(proxies=settings.PROXY, headers=settings.GITHUB_HEADERS,
                              timeout=30).get_res(self._files_api)
-            if not r or r.status_code != 200:
+            if r and not r.ok:
                 return None, f"连接仓库失败：{r.status_code} - {r.reason}"
+            elif not r:
+                return None, "连接仓库失败"
             files_info = r.json()
             for item in files_info:
                 save_path = need_updates.get(item.get("name"))

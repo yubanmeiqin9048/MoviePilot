@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Optional, List, Tuple, Union
 
+import cn2an
+
 from app import schemas
 from app.core.config import settings
 from app.core.context import MediaInfo
@@ -10,7 +12,7 @@ from app.modules import _ModuleBase
 from app.modules.themoviedb.category import CategoryHelper
 from app.modules.themoviedb.scraper import TmdbScraper
 from app.modules.themoviedb.tmdb_cache import TmdbCache
-from app.modules.themoviedb.tmdbapi import TmdbHelper
+from app.modules.themoviedb.tmdbapi import TmdbApi
 from app.schemas.types import MediaType, MediaImageType
 from app.utils.http import RequestUtils
 from app.utils.system import SystemUtils
@@ -24,7 +26,7 @@ class TheMovieDbModule(_ModuleBase):
     # 元数据缓存
     cache: TmdbCache = None
     # TMDB
-    tmdb: TmdbHelper = None
+    tmdb: TmdbApi = None
     # 二级分类
     category: CategoryHelper = None
     # 刮削器
@@ -32,12 +34,13 @@ class TheMovieDbModule(_ModuleBase):
 
     def init_module(self) -> None:
         self.cache = TmdbCache()
-        self.tmdb = TmdbHelper()
+        self.tmdb = TmdbApi()
         self.category = CategoryHelper()
         self.scraper = TmdbScraper(self.tmdb)
 
     def stop(self):
         self.cache.save()
+        self.tmdb.close()
 
     def test(self) -> Tuple[bool, str]:
         """
@@ -75,59 +78,69 @@ class TheMovieDbModule(_ModuleBase):
             return None
 
         if not meta:
+            # 未提供元数据时，直接使用tmdbid查询，不使用缓存
             cache_info = {}
         elif not meta.name:
             logger.warn("识别媒体信息时未提供元数据名称")
             return None
         else:
+            # 读取缓存
             if mtype:
                 meta.type = mtype
             if tmdbid:
                 meta.tmdbid = tmdbid
-            # 读取缓存
             cache_info = self.cache.get(meta)
+
+        # 识别匹配
         if not cache_info or not cache:
             # 缓存没有或者强制不使用缓存
             if tmdbid:
                 # 直接查询详情
                 info = self.tmdb.get_info(mtype=mtype, tmdbid=tmdbid)
             elif meta:
-                if meta.begin_season:
-                    logger.info(f"正在识别 {meta.name} 第{meta.begin_season}季 ...")
-                else:
-                    logger.info(f"正在识别 {meta.name} ...")
-                if meta.type == MediaType.UNKNOWN and not meta.year:
-                    info = self.tmdb.match_multi(meta.name)
-                else:
-                    if meta.type == MediaType.TV:
-                        # 确定是电视
-                        info = self.tmdb.match(name=meta.name,
-                                               year=meta.year,
-                                               mtype=meta.type,
-                                               season_year=meta.year,
-                                               season_number=meta.begin_season)
-                        if not info:
-                            # 去掉年份再查一次
-                            info = self.tmdb.match(name=meta.name,
-                                                   mtype=meta.type)
+                info = {}
+                # 使用中英文名分别识别，去重去空，但要保持顺序
+                names = list(dict.fromkeys([k for k in [meta.cn_name, meta.en_name] if k]))
+                for name in names:
+                    if meta.begin_season:
+                        logger.info(f"正在识别 {name} 第{meta.begin_season}季 ...")
                     else:
-                        # 有年份先按电影查
-                        info = self.tmdb.match(name=meta.name,
-                                               year=meta.year,
-                                               mtype=MediaType.MOVIE)
-                        # 没有再按电视剧查
-                        if not info:
-                            info = self.tmdb.match(name=meta.name,
+                        logger.info(f"正在识别 {name} ...")
+                    if meta.type == MediaType.UNKNOWN and not meta.year:
+                        info = self.tmdb.match_multi(name)
+                    else:
+                        if meta.type == MediaType.TV:
+                            # 确定是电视
+                            info = self.tmdb.match(name=name,
                                                    year=meta.year,
-                                                   mtype=MediaType.TV)
-                        if not info:
-                            # 去掉年份和类型再查一次
-                            info = self.tmdb.match_multi(name=meta.name)
+                                                   mtype=meta.type,
+                                                   season_year=meta.year,
+                                                   season_number=meta.begin_season)
+                            if not info:
+                                # 去掉年份再查一次
+                                info = self.tmdb.match(name=name,
+                                                       mtype=meta.type)
+                        else:
+                            # 有年份先按电影查
+                            info = self.tmdb.match(name=name,
+                                                   year=meta.year,
+                                                   mtype=MediaType.MOVIE)
+                            # 没有再按电视剧查
+                            if not info:
+                                info = self.tmdb.match(name=name,
+                                                       year=meta.year,
+                                                       mtype=MediaType.TV)
+                            if not info:
+                                # 去掉年份和类型再查一次
+                                info = self.tmdb.match_multi(name=name)
 
-                if not info:
-                    # 从网站查询
-                    info = self.tmdb.match_web(name=meta.name,
-                                               mtype=meta.type)
+                    if not info:
+                        # 从网站查询
+                        info = self.tmdb.match_web(name=name,
+                                                   mtype=meta.type)
+                    if info:
+                        # 查到就退出
+                        break
                 # 补充全量信息
                 if info and not info.get("genres"):
                     info = self.tmdb.get_info(mtype=info.get("media_type"),
@@ -135,6 +148,7 @@ class TheMovieDbModule(_ModuleBase):
             else:
                 logger.error("识别媒体信息时未提供元数据或tmdbid")
                 return None
+
             # 保存到缓存
             if meta:
                 self.cache.update(meta, info)
@@ -234,15 +248,26 @@ class TheMovieDbModule(_ModuleBase):
                 results = self.tmdb.search_movies(meta.name, meta.year)
             else:
                 results = self.tmdb.search_tvs(meta.name, meta.year)
-
-        return [MediaInfo(tmdb_info=info) for info in results]
+        # 将搜索词中的季写入标题中
+        if results:
+            medias = [MediaInfo(tmdb_info=info) for info in results]
+            if meta.begin_season:
+                # 小写数据转大写
+                season_str = cn2an.an2cn(meta.begin_season, "low")
+                for media in medias:
+                    if media.type == MediaType.TV:
+                        media.title = f"{media.title} 第{season_str}季"
+                        media.season = meta.begin_season
+            return medias
+        return []
 
     def scrape_metadata(self, path: Path, mediainfo: MediaInfo, transfer_type: str,
-                        force_nfo: bool = False, force_img: bool = False) -> None:
+                        metainfo: MetaBase = None, force_nfo: bool = False, force_img: bool = False) -> None:
         """
         刮削元数据
         :param path: 媒体文件路径
         :param mediainfo:  识别的媒体信息
+        :param metainfo: 源文件的识别元数据
         :param transfer_type:  转移类型
         :param force_nfo:  强制刮削nfo
         :param force_img:  强制刮削图片
@@ -258,6 +283,7 @@ class TheMovieDbModule(_ModuleBase):
             self.scraper.gen_scraper_files(mediainfo=mediainfo,
                                            file_path=scrape_path,
                                            transfer_type=transfer_type,
+                                           metainfo=metainfo,
                                            force_nfo=force_nfo,
                                            force_img=force_img)
         elif path.is_file():
@@ -266,6 +292,7 @@ class TheMovieDbModule(_ModuleBase):
             self.scraper.gen_scraper_files(mediainfo=mediainfo,
                                            file_path=path,
                                            transfer_type=transfer_type,
+                                           metainfo=metainfo,
                                            force_nfo=force_nfo,
                                            force_img=force_img)
         else:
@@ -401,15 +428,15 @@ class TheMovieDbModule(_ModuleBase):
         # 图片相对路径
         image_path = None
         image_prefix = image_prefix or "w500"
-        if not season and not episode:
+        if season is None and not episode:
             tmdbinfo = self.tmdb.get_info(mtype=mtype, tmdbid=int(mediaid))
             if tmdbinfo:
                 image_path = tmdbinfo.get(image_type.value)
-        elif season and episode:
+        elif season is not None and episode:
             episodeinfo = self.tmdb.get_tv_episode_detail(tmdbid=int(mediaid), season=season, episode=episode)
             if episodeinfo:
                 image_path = episodeinfo.get("still_path")
-        elif season:
+        elif season is not None:
             seasoninfo = self.tmdb.get_tv_season_detail(tmdbid=int(mediaid), season=season)
             if seasoninfo:
                 image_path = seasoninfo.get(image_type.value)

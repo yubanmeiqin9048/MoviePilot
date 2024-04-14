@@ -1,4 +1,4 @@
-from typing import Optional, Union, Tuple, List
+from typing import Optional, Union, Tuple, List, Dict
 
 import transmission_rpc
 from transmission_rpc import Client, Torrent, File
@@ -18,7 +18,8 @@ class Transmission:
     trc: Optional[Client] = None
 
     # 参考transmission web，仅查询需要的参数，加速种子搜索
-    _trarg = ["id", "name", "status", "labels", "hashString", "totalSize", "percentDone", "addedDate", "trackerStats",
+    _trarg = ["id", "name", "status", "labels", "hashString", "totalSize", "percentDone", "addedDate", "trackerList",
+              "trackerStats",
               "leftUntilDone", "rateDownload", "rateUpload", "recheckProgress", "rateDownload", "rateUpload",
               "peersGettingFromUs", "peersSendingToUs", "uploadRatio", "uploadedEver", "downloadedEver", "downloadDir",
               "error", "errorString", "doneDate", "queuePosition", "activityDate", "trackers"]
@@ -289,6 +290,29 @@ class Transmission:
             logger.error(f"设置速度限制出错：{str(err)}")
             return False
 
+    def get_speed_limit(self) -> Optional[Tuple[float, float]]:
+        """
+        获取TR速度
+        :return: download_limit 下载速度 默认是0
+                 upload_limit 上传速度   默认是0
+        """
+        if not self.trc:
+            return None
+
+        download_limit = 0
+        upload_limit = 0
+        try:
+            download_limit = self.trc.get_session().get('speed_limit_down')
+            upload_limit = self.trc.get_session().get('speed_limit_up')
+
+        except Exception as err:
+            logger.error(f"获取速度限制出错：{str(err)}")
+
+        return (
+            download_limit,
+            upload_limit
+        )
+
     def recheck_torrents(self, ids: Union[str, list]) -> bool:
         """
         重新校验种子
@@ -373,3 +397,15 @@ class Transmission:
             logger.error(f"修改tracker出错：{str(err)}")
             return False
 
+    def get_session(self) -> Dict[str, Union[int, bool, str]]:
+        """
+        获取Transmission当前的会话信息和配置设置
+        :return dict or False
+        """
+        if not self.trc:
+            return False
+        try:
+            return self.trc.get_session()
+        except Exception as err:
+            logger.error(f"获取session出错：{str(err)}")
+            return False

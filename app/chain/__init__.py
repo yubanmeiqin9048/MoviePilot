@@ -119,6 +119,7 @@ class ChainBase(metaclass=ABCMeta):
                         mtype: MediaType = None,
                         tmdbid: int = None,
                         doubanid: str = None,
+                        bangumiid: int = None,
                         cache: bool = True) -> Optional[MediaInfo]:
         """
         识别媒体信息
@@ -126,6 +127,7 @@ class ChainBase(metaclass=ABCMeta):
         :param mtype:    识别的媒体类型，与tmdbid配套
         :param tmdbid:   tmdbid
         :param doubanid: 豆瓣ID
+        :param bangumiid: BangumiID
         :param cache:    是否使用缓存
         :return: 识别的媒体信息，包括剧集信息
         """
@@ -136,8 +138,12 @@ class ChainBase(metaclass=ABCMeta):
             tmdbid = meta.tmdbid
         if not doubanid and hasattr(meta, "doubanid"):
             doubanid = meta.doubanid
+        # 有tmdbid时不使用其它ID
+        if tmdbid:
+            doubanid = None
+            bangumiid = None
         return self.run_module("recognize_media", meta=meta, mtype=mtype,
-                               tmdbid=tmdbid, doubanid=doubanid, cache=cache)
+                               tmdbid=tmdbid, doubanid=doubanid, bangumiid=bangumiid, cache=cache)
 
     def match_doubaninfo(self, name: str, imdbid: str = None,
                          mtype: MediaType = None, year: str = None, season: int = None) -> Optional[dict]:
@@ -213,6 +219,14 @@ class ChainBase(metaclass=ABCMeta):
         :return: TVDB信息
         """
         return self.run_module("tmdb_info", tmdbid=tmdbid, mtype=mtype)
+
+    def bangumi_info(self, bangumiid: int) -> Optional[dict]:
+        """
+        获取Bangumi信息
+        :param bangumiid: int
+        :return: Bangumi信息
+        """
+        return self.run_module("bangumi_info", bangumiid=bangumiid)
 
     def message_parser(self, body: Any, form: Any,
                        args: Any) -> Optional[CommingMessage]:
@@ -437,6 +451,13 @@ class ChainBase(metaclass=ABCMeta):
         :param medias:  媒体列表
         :return: 成功或失败
         """
+        note_list = [media.to_dict() for media in medias]
+        self.messagehelper.put(message, role="user", note=note_list)
+        self.messageoper.add(channel=message.channel, mtype=message.mtype,
+                             title=message.title, text=message.text,
+                             image=message.image, link=message.link,
+                             userid=message.userid, action=1,
+                             note=note_list)
         return self.run_module("post_medias_message", message=message, medias=medias)
 
     def post_torrents_message(self, message: Notification, torrents: List[Context]) -> Optional[bool]:
@@ -446,20 +467,28 @@ class ChainBase(metaclass=ABCMeta):
         :param torrents:  种子列表
         :return: 成功或失败
         """
+        note_list = [torrent.torrent_info.to_dict() for torrent in torrents]
+        self.messagehelper.put(message, role="user", note=note_list)
+        self.messageoper.add(channel=message.channel, mtype=message.mtype,
+                             title=message.title, text=message.text,
+                             image=message.image, link=message.link,
+                             userid=message.userid, action=1,
+                             note=note_list)
         return self.run_module("post_torrents_message", message=message, torrents=torrents)
 
     def scrape_metadata(self, path: Path, mediainfo: MediaInfo, transfer_type: str,
-                        force_nfo: bool = False, force_img: bool = False) -> None:
+                        metainfo: MetaBase = None, force_nfo: bool = False, force_img: bool = False) -> None:
         """
         刮削元数据
         :param path: 媒体文件路径
         :param mediainfo:  识别的媒体信息
+        :param metainfo: 源文件的识别元数据
         :param transfer_type:  转移模式
         :param force_nfo:  强制刮削nfo
         :param force_img:  强制刮削图片
         :return: 成功或失败
         """
-        self.run_module("scrape_metadata", path=path, mediainfo=mediainfo,
+        self.run_module("scrape_metadata", path=path, mediainfo=mediainfo, metainfo=metainfo,
                         transfer_type=transfer_type, force_nfo=force_nfo, force_img=force_img)
 
     def register_commands(self, commands: Dict[str, dict]) -> None:

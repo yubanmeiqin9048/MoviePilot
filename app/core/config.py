@@ -66,7 +66,7 @@ class Settings(BaseSettings):
                           '.rmvb', '.avi', '.mov', '.mpeg',
                           '.mpg', '.wmv', '.3gp', '.asf',
                           '.m4v', '.flv', '.m2ts', '.strm',
-                          '.tp']
+                          '.tp', '.f4v']
     # 支持的字幕文件后缀格式
     RMT_SUBEXT: list = ['.srt', '.ass', '.ssa', '.sup']
     # 下载器临时文件后缀
@@ -187,6 +187,8 @@ class Settings(BaseSettings):
     PLEX_TOKEN: Optional[str] = None
     # 转移方式 link/copy/move/softlink
     TRANSFER_TYPE: str = "copy"
+    # CookieCloud是否启动本地服务
+    COOKIECLOUD_ENABLE_LOCAL: Optional[bool] = False
     # CookieCloud服务器地址
     COOKIECLOUD_HOST: str = "https://movie-pilot.org/cookiecloud"
     # CookieCloud用户KEY
@@ -232,6 +234,10 @@ class Settings(BaseSettings):
     AUTO_UPDATE_RESOURCE: bool = True
     # 元数据识别缓存过期时间（小时）
     META_CACHE_EXPIRE: int = 0
+    # 是否启用DOH解析域名
+    DOH_ENABLE: bool = True
+    # 搜索多个名称
+    SEARCH_MULTIPLE_NAME: bool = False
 
     @validator("SUBSCRIBE_RSS_INTERVAL",
                "COOKIECLOUD_INTERVAL",
@@ -275,6 +281,10 @@ class Settings(BaseSettings):
     @property
     def LOG_PATH(self):
         return self.CONFIG_PATH / "logs"
+    
+    @property
+    def COOKIE_PATH(self):
+        return self.CONFIG_PATH / "cookies"
 
     @property
     def CACHE_CONF(self):
@@ -395,6 +405,9 @@ class Settings(BaseSettings):
             if not p.exists():
                 p.mkdir(parents=True, exist_ok=True)
         with self.LOG_PATH as p:
+            if not p.exists():
+                p.mkdir(parents=True, exist_ok=True)
+        with self.COOKIE_PATH as p:
             if not p.exists():
                 p.mkdir(parents=True, exist_ok=True)
 

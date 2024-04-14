@@ -15,7 +15,7 @@ from .tmdbv3api import TMDb, Search, Movie, TV, Season, Episode, Discover, Trend
 from .tmdbv3api.exceptions import TMDbException
 
 
-class TmdbHelper:
+class TmdbApi:
     """
     TMDB识别匹配
     """
@@ -1027,7 +1027,7 @@ class TmdbHelper:
         if not self.episode:
             return {}
         try:
-            logger.info("正在查询TMDB集图片：%s，季：%s，集：%s ..." % (tmdbid, season, episode))
+            logger.info("正在查询TMDB集详情：%s，季：%s，集：%s ..." % (tmdbid, season, episode))
             tmdbinfo = self.episode.details(tv_id=tmdbid, season_num=season, episode_num=episode)
             return tmdbinfo or {}
         except Exception as e:
@@ -1271,3 +1271,9 @@ class TmdbHelper:
         except Exception as e:
             print(str(e))
             return {}
+
+    def close(self):
+        """
+        关闭连接
+        """
+        self.tmdb.close()

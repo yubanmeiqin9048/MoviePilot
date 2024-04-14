@@ -12,6 +12,7 @@ from app.core.event import eventmanager, Event, EventManager
 from app.db.models.site import Site
 from app.db.site_oper import SiteOper
 from app.db.siteicon_oper import SiteIconOper
+from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.browser import PlaywrightHelper
 from app.helper.cloudflare import under_challenge
 from app.helper.cookie import CookieHelper
@@ -40,17 +41,22 @@ class SiteChain(ChainBase):
         self.rsshelper = RssHelper()
         self.cookiehelper = CookieHelper()
         self.message = MessageHelper()
-        self.cookiecloud = CookieCloudHelper(
-            server=settings.COOKIECLOUD_HOST,
-            key=settings.COOKIECLOUD_KEY,
-            password=settings.COOKIECLOUD_PASSWORD
-        )
+        self.cookiecloud = CookieCloudHelper()
+        self.systemconfig = SystemConfigOper()
 
         # 特殊站点登录验证
         self.special_site_test = {
             "zhuque.in": self.__zhuque_test,
-            # "m-team.io": self.__mteam_test,
+            "m-team.io": self.__mteam_test,
+            "m-team.cc": self.__mteam_test,
+            "ptlsp.com": self.__ptlsp_test,
         }
+
+    def is_special_site(self, domain: str) -> bool:
+        """
+        判断是否特殊站点
+        """
+        return domain in self.special_site_test
 
     @staticmethod
     def __zhuque_test(site: Site) -> Tuple[bool, str]:
@@ -59,8 +65,9 @@ class SiteChain(ChainBase):
         """
         # 获取token
         token = None
+        user_agent = site.ua or settings.USER_AGENT
         res = RequestUtils(
-            ua=site.ua,
+            ua=user_agent,
             cookies=site.cookie,
             proxies=settings.PROXY if site.proxy else None,
             timeout=15
@@ -76,7 +83,7 @@ class SiteChain(ChainBase):
             headers={
                 'X-CSRF-TOKEN': token,
                 "Content-Type": "application/json; charset=utf-8",
-                "User-Agent": f"{site.ua}"
+                "User-Agent": f"{user_agent}"
             },
             cookies=site.cookie,
             proxies=settings.PROXY if site.proxy else None,
@@ -93,9 +100,10 @@ class SiteChain(ChainBase):
         """
         判断站点是否已经登陆：m-team
         """
+        user_agent = site.ua or settings.USER_AGENT
         url = f"{site.url}api/member/profile"
         res = RequestUtils(
-            ua=site.ua,
+            ua=user_agent,
             cookies=site.cookie,
             proxies=settings.PROXY if site.proxy else None,
             timeout=15
@@ -103,8 +111,25 @@ class SiteChain(ChainBase):
         if res and res.status_code == 200:
             user_info = res.json()
             if user_info and user_info.get("data"):
-                return True, "连接成功"
+                # 更新最后访问时间
+                res = RequestUtils(cookies=site.cookie,
+                                   ua=user_agent,
+                                   timeout=60,
+                                   proxies=settings.PROXY if site.proxy else None,
+                                   referer=f"{site.url}index"
+                                   ).post_res(url=urljoin(url, "api/member/updateLastBrowse"))
+                if res:
+                    return True, "连接成功"
+                else:
+                    return True, f"连接成功，但更新状态失败"
         return False, "Cookie已失效"
+
+    def __ptlsp_test(self, site: Site) -> Tuple[bool, str]:
+        """
+        判断站点是否已经登陆：ptlsp
+        """
+        site.url = f"{site.url}index.php"
+        return self.__test(site)
 
     @staticmethod
     def __parse_favicon(url: str, cookie: str, ua: str) -> Tuple[str, Optional[str]]:
@@ -179,7 +204,7 @@ class SiteChain(ChainBase):
                         rss_url, errmsg = self.rsshelper.get_rss_link(
                             url=site_info.url,
                             cookie=cookie,
-                            ua=settings.USER_AGENT,
+                            ua=site_info.ua or settings.USER_AGENT,
                             proxy=True if site_info.proxy else False
                         )
                         if rss_url:
@@ -234,9 +259,9 @@ class SiteChain(ChainBase):
                                   public=1 if indexer.get("public") else 0)
                 _add_count += 1
 
-            # 通知缓存站点图标
+            # 通知站点更新
             if indexer:
-                EventManager().send_event(EventType.CacheSiteIcon, {
+                EventManager().send_event(EventType.SiteUpdated, {
                     "domain": domain,
                 })
         # 处理完成
@@ -248,7 +273,7 @@ class SiteChain(ChainBase):
         logger.info(f"CookieCloud同步成功：{ret_msg}")
         return True, ret_msg
 
-    @eventmanager.register(EventType.CacheSiteIcon)
+    @eventmanager.register(EventType.SiteUpdated)
     def cache_site_icon(self, event: Event):
         """
         缓存站点图标
@@ -290,6 +315,27 @@ class SiteChain(ChainBase):
             else:
                 logger.warn(f"缓存站点 {indexer.get('name')} 图标失败")
 
+    @eventmanager.register(EventType.SiteUpdated)
+    def clear_site_data(self, event: Event):
+        """
+        清理站点数据
+        """
+        if not event:
+            return
+        event_data = event.event_data or {}
+        # 主域名
+        domain = event_data.get("domain")
+        if not domain:
+            return
+        # 获取主域名中间那段
+        domain_host = StringUtils.get_url_host(domain)
+        # 查询以"site.domain_host"开头的配置项，并清除
+        site_keys = self.systemconfig.all().keys()
+        for key in site_keys:
+            if key.startswith(f"site.{domain_host}"):
+                logger.info(f"清理站点配置：{key}")
+                self.systemconfig.delete(key)
+
     def test(self, url: str) -> Tuple[bool, str]:
         """
         测试站点是否可用
@@ -309,47 +355,54 @@ class SiteChain(ChainBase):
                 return self.special_site_test[domain](site_info)
 
             # 通用站点测试
-            site_url = site_info.url
-            site_cookie = site_info.cookie
-            ua = site_info.ua
-            render = site_info.render
-            public = site_info.public
-            proxies = settings.PROXY if site_info.proxy else None
-            proxy_server = settings.PROXY_SERVER if site_info.proxy else None
-
-            # 访问链接
-            if render:
-                page_source = PlaywrightHelper().get_page_source(url=site_url,
-                                                                 cookies=site_cookie,
-                                                                 ua=ua,
-                                                                 proxies=proxy_server)
-                if not public and not SiteUtils.is_logged_in(page_source):
-                    if under_challenge(page_source):
-                        return False, f"无法通过Cloudflare！"
-                    return False, f"仿真登录失败，Cookie已失效！"
-            else:
-                res = RequestUtils(cookies=site_cookie,
-                                   ua=ua,
-                                   proxies=proxies
-                                   ).get_res(url=site_url)
-                # 判断登录状态
-                if res and res.status_code in [200, 500, 403]:
-                    if not public and not SiteUtils.is_logged_in(res.text):
-                        if under_challenge(res.text):
-                            msg = "站点被Cloudflare防护，请打开站点浏览器仿真"
-                        elif res.status_code == 200:
-                            msg = "Cookie已失效"
-                        else:
-                            msg = f"状态码：{res.status_code}"
-                        return False, f"{msg}！"
-                    elif public and res.status_code != 200:
-                        return False, f"状态码：{res.status_code}！"
-                elif res is not None:
-                    return False, f"状态码：{res.status_code}！"
-                else:
-                    return False, f"无法打开网站！"
+            return self.__test(site_info)
         except Exception as e:
             return False, f"{str(e)}！"
+
+    @staticmethod
+    def __test(site_info: Site) -> Tuple[bool, str]:
+        """
+        通用站点测试
+        """
+        site_url = site_info.url
+        site_cookie = site_info.cookie
+        ua = site_info.ua or settings.USER_AGENT
+        render = site_info.render
+        public = site_info.public
+        proxies = settings.PROXY if site_info.proxy else None
+        proxy_server = settings.PROXY_SERVER if site_info.proxy else None
+
+        # 访问链接
+        if render:
+            page_source = PlaywrightHelper().get_page_source(url=site_url,
+                                                             cookies=site_cookie,
+                                                             ua=ua,
+                                                             proxies=proxy_server)
+            if not public and not SiteUtils.is_logged_in(page_source):
+                if under_challenge(page_source):
+                    return False, f"无法通过Cloudflare！"
+                return False, f"仿真登录失败，Cookie已失效！"
+        else:
+            res = RequestUtils(cookies=site_cookie,
+                               ua=ua,
+                               proxies=proxies
+                               ).get_res(url=site_url)
+            # 判断登录状态
+            if res and res.status_code in [200, 500, 403]:
+                if not public and not SiteUtils.is_logged_in(res.text):
+                    if under_challenge(res.text):
+                        msg = "站点被Cloudflare防护，请打开站点浏览器仿真"
+                    elif res.status_code == 200:
+                        msg = "Cookie已失效"
+                    else:
+                        msg = f"状态码：{res.status_code}"
+                    return False, f"{msg}！"
+                elif public and res.status_code != 200:
+                    return False, f"状态码：{res.status_code}！"
+            elif res is not None:
+                return False, f"状态码：{res.status_code}！"
+            else:
+                return False, f"无法打开网站！"
         return True, "连接成功"
 
     def remote_list(self, channel: MessageChannel, userid: Union[str, int] = None):

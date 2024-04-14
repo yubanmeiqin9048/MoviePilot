@@ -7,7 +7,9 @@ from typing import Dict, Tuple, Optional, List
 from cachetools import TTLCache, cached
 
 from app.core.config import settings
+from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
+from app.schemas.types import SystemConfigKey
 from app.utils.http import RequestUtils
 from app.utils.singleton import Singleton
 from app.utils.system import SystemUtils
@@ -20,7 +22,19 @@ class PluginHelper(metaclass=Singleton):
 
     _base_url = "https://raw.githubusercontent.com/%s/%s/main/"
 
-    @cached(cache=TTLCache(maxsize=100, ttl=1800))
+    _install_reg = "https://movie-pilot.org/plugin/install/%s"
+
+    _install_report = "https://movie-pilot.org/plugin/install"
+
+    _install_statistic = "https://movie-pilot.org/plugin/statistic"
+
+    def __init__(self):
+        self.systemconfig = SystemConfigOper()
+        if not self.systemconfig.get(SystemConfigKey.PluginInstallReport):
+            if self.install_report():
+                self.systemconfig.set(SystemConfigKey.PluginInstallReport, "1")
+
+    @cached(cache=TTLCache(maxsize=1000, ttl=1800))
     def get_plugins(self, repo_url: str) -> Dict[str, dict]:
         """
         获取Github所有最新插件列表
@@ -61,6 +75,45 @@ class PluginHelper(metaclass=Singleton):
             return None, None
         return user, repo
 
+    @cached(cache=TTLCache(maxsize=1, ttl=1800))
+    def get_statistic(self) -> Dict:
+        """
+        获取插件安装统计
+        """
+        res = RequestUtils(timeout=10).get_res(self._install_statistic)
+        if res and res.status_code == 200:
+            return res.json()
+        return {}
+
+    def install_reg(self, pid: str) -> bool:
+        """
+        安装插件统计
+        """
+        if not pid:
+            return False
+        res = RequestUtils(timeout=5).get_res(self._install_reg % pid)
+        if res and res.status_code == 200:
+            return True
+        return False
+
+    def install_report(self) -> bool:
+        """
+        上报存量插件安装统计
+        """
+        plugins = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins)
+        if not plugins:
+            return False
+        res = RequestUtils(content_type="application/json",
+                           timeout=5).post(self._install_report,
+                                           json={
+                                               "plugins": [
+                                                   {
+                                                       "plugin_id": plugin,
+                                                   } for plugin in plugins
+                                               ]
+                                           })
+        return True if res else False
+
     def install(self, pid: str, repo_url: str) -> Tuple[bool, str]:
         """
         安装插件
@@ -79,7 +132,9 @@ class PluginHelper(metaclass=Singleton):
             """
             file_api = f"https://api.github.com/repos/{user}/{repo}/contents/plugins/{_p.lower()}"
             r = RequestUtils(proxies=settings.PROXY, headers=settings.GITHUB_HEADERS, timeout=30).get_res(file_api)
-            if not r or r.status_code != 200:
+            if r is None:
+                return None, "连接仓库失败"
+            elif r.status_code != 200:
                 return None, f"连接仓库失败：{r.status_code} - {r.reason}"
             ret = r.json()
             if ret and ret[0].get("message") == "Not Found":
@@ -154,4 +209,7 @@ class PluginHelper(metaclass=Singleton):
         requirements_file = plugin_dir / "requirements.txt"
         if requirements_file.exists():
             SystemUtils.execute(f"pip install -r {requirements_file} > /dev/null 2>&1")
+        # 安装成功后统计
+        self.install_reg(pid)
+
         return True, ""

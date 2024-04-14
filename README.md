@@ -21,7 +21,11 @@
 
 ### 2. **安装CookieCloud服务端（可选）**
 
-MoviePilot内置了公共CookieCloud服务器，如果需要自建服务，可参考 [CookieCloud](https://github.com/easychen/CookieCloud) 项目进行搭建，docker镜像请点击 [这里](https://hub.docker.com/r/easychen/cookiecloud)。
+通过CookieCloud可以快速同步浏览器中保存的站点数据到MoviePilot，支持以下服务方式：
+
+- 使用公共CookieCloud远程服务器（默认）：服务器地址为：https://movie-pilot.org/cookiecloud
+- 使用内建的本地Cookie服务：在 `设定` - `站点` 中打开`启用本地CookieCloud服务器`后，将启用内建的CookieCloud提供服务，服务地址为：`http://localhost:${NGINX_PORT}/cookiecloud/`, Cookie数据加密保存在配置文件目录下的`cookies`文件中
+- 自建服务CookieCloud服务器：参考 [CookieCloud](https://github.com/easychen/CookieCloud) 项目进行搭建，docker镜像请点击 [这里](https://hub.docker.com/r/easychen/cookiecloud)
 
 **声明：** 本项目不会收集用户敏感数据，Cookie同步也是基于CookieCloud项目实现，非本项目提供的能力。技术角度上CookieCloud采用端到端加密，在个人不泄露`用户KEY`和`端对端加密密码`的情况下第三方无法窃取任何用户信息（包括服务器持有者）。如果你不放心，可以不使用公共服务或者不使用本项目，但如果使用后发生了任何信息泄露与本项目无关！
 
@@ -43,7 +47,8 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 
 - Windows
 
-  下载 [MoviePilot.exe](https://github.com/jxxghp/MoviePilot/releases)，双击运行后自动生成配置文件目录，访问：http://localhost:3000
+  1. 独立执行文件版本：下载 [MoviePilot.exe](https://github.com/jxxghp/MoviePilot/releases)，双击运行后自动生成配置文件目录，访问：http://localhost:3000
+  2. 安装包版本：[Windows-MoviePilot](https://github.com/developer-wlj/Windows-MoviePilot)
 
 - 群晖套件
 
@@ -77,7 +82,7 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 - **❗AUTH_SITE：** 认证站点（认证通过后才能使用站点相关功能），支持配置多个认证站点，使用`,`分隔，如：`iyuu,hhclub`，会依次执行认证操作，直到有一个站点认证成功。  
 
     配置`AUTH_SITE`后，需要根据下表配置对应站点的认证参数。
-    认证资源`v1.1.4`支持：`iyuu`/`hhclub`/`audiences`/`hddolby`/`zmpt`/`freefarm`/`hdfans`/`wintersakura`/`leaves`/`ptba` /`icc2022`/`ptlsp`/`xingtan`/`ptvicomo`/`agsvpt`/`hdkyl`
+    认证资源`v1.2.4+`支持：`iyuu`/`hhclub`/`audiences`/`hddolby`/`zmpt`/`freefarm`/`hdfans`/`wintersakura`/`leaves`/`ptba` /`icc2022`/`ptlsp`/`xingtan`/`ptvicomo`/`agsvpt`/`hdkyl`/`qingwa`
   
     |      站点      |                          参数                           |
     |:------------:|:-----------------------------------------------------:|
@@ -97,6 +102,7 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
     |   ptvicomo   |     `PTVICOMO_UID`：用户ID<br/>`PTVICOMO_PASSKEY`：密钥     |
     |    agsvpt    |       `AGSVPT_UID`：用户ID<br/>`AGSVPT_PASSKEY`：密钥       |
     |    hdkyl     |        `HDKYL_UID`：用户ID<br/>`HDKYL_PASSKEY`：密钥        |
+    |   qingwa    |      `QINGWA_UID`：用户ID<br/>`QINGWA_PASSKEY`：密钥      |
 
 
 ### 2. **环境变量 / 配置文件**
@@ -106,6 +112,7 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 - **❗SUPERUSER：** 超级管理员用户名，默认`admin`，安装后使用该用户登录后台管理界面，**注意：启动一次后再次修改该值不会生效，除非删除数据库文件！**
 - **❗API_TOKEN：** API密钥，默认`moviepilot`，在媒体服务器Webhook、微信回调等地址配置中需要加上`?token=`该值，建议修改为复杂字符串
 - **BIG_MEMORY_MODE：** 大内存模式，默认为`false`，开启后会增加缓存数量，占用更多的内存，但响应速度会更快
+- **DOH_ENABLE：** DNS over HTTPS开关，`true`/`false`，默认`true`，开启后会使用DOH对api.themoviedb.org等域名进行解析，以减少被DNS污染的情况，提升网络连通性
 - **META_CACHE_EXPIRE：** 元数据识别缓存过期时间（小时），数字型，不配置或者配置为0时使用系统默认（大内存模式为7天，否则为3天），调大该值可减少themoviedb的访问次数
 - **GITHUB_TOKEN：** Github token，提高自动更新、插件安装等请求Github Api的限流阈值，格式：ghp_****
 - **DEV:** 开发者模式，`true`/`false`，默认`false`，开启后会暂停所有定时任务
@@ -124,6 +131,8 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 - **OCR_HOST：** OCR识别服务器地址，格式：`http(s)://ip:port`，用于识别站点验证码实现自动登录获取Cookie等，不配置默认使用内建服务器`https://movie-pilot.org`，可使用 [这个镜像](https://hub.docker.com/r/jxxghp/moviepilot-ocr) 自行搭建。
 ---
 - **DOWNLOAD_SUBTITLE：** 下载站点字幕，`true`/`false`，默认`true`
+---
+- **SEARCH_MULTIPLE_NAME：** 搜索时是否使用多个名称搜索，`true`/`false`，默认`false`，开启后会使用多个名称进行搜索，搜索结果会更全面，但会增加搜索时间；关闭时只要其中一个名称搜索到结果或全部名称搜索完毕即停止
 ---
 - **MOVIE_RENAME_FORMAT：** 电影重命名格式，基于jinjia2语法
 
@@ -221,10 +230,10 @@ location / {
 ```
 - 反代使用ssl时，需要开启`http2`，否则会导致日志加载时间过长或不可用。以`Nginx`为例：
 ```nginx configuration
-server{
+server {
     listen 443 ssl;
     http2 on;
-    ...
+    # ...
 }
 ```
 - 新建的企业微信应用需要固定公网IP的代理才能收到消息，代理添加以下代码：

@@ -42,20 +42,25 @@ def add_site(
     """
     if not site_in.url:
         return schemas.Response(success=False, message="站点地址不能为空")
+    if SitesHelper().auth_level < 2:
+        return schemas.Response(success=False, message="用户未通过认证，无法使用站点功能！")
     domain = StringUtils.get_url_domain(site_in.url)
     site_info = SitesHelper().get_indexer(domain)
     if not site_info:
-        return schemas.Response(success=False, message="该站点不支持或用户未通过认证")
+        return schemas.Response(success=False, message="该站点不支持，请检查站点域名是否正确")
     if Site.get_by_domain(db, domain):
         return schemas.Response(success=False, message=f"{domain} 站点己存在")
     # 保存站点信息
     site_in.domain = domain
+    # 校正地址格式
+    _scheme, _netloc = StringUtils.get_url_netloc(site_in.url)
+    site_in.url = f"{_scheme}://{_netloc}/"
     site_in.name = site_info.get("name")
     site_in.id = None
     site = Site(**site_in.dict())
     site.create(db)
-    # 通知缓存站点图标
-    EventManager().send_event(EventType.CacheSiteIcon, {
+    # 通知站点更新
+    EventManager().send_event(EventType.SiteUpdated, {
         "domain": domain
     })
     return schemas.Response(success=True)
@@ -74,9 +79,12 @@ def update_site(
     site = Site.get(db, site_in.id)
     if not site:
         return schemas.Response(success=False, message="站点不存在")
+    # 校正地址格式
+    _scheme, _netloc = StringUtils.get_url_netloc(site_in.url)
+    site_in.url = f"{_scheme}://{_netloc}/"
     site.update(db, site_in.dict())
-    # 通知缓存站点图标
-    EventManager().send_event(EventType.CacheSiteIcon, {
+    # 通知站点更新
+    EventManager().send_event(EventType.SiteUpdated, {
         "domain": site_in.domain
     })
     return schemas.Response(success=True)
@@ -124,7 +132,7 @@ def reset(db: Session = Depends(get_db),
     # 插件站点删除
     EventManager().send_event(EventType.SiteDeleted,
                               {
-                                  "site_id": None
+                                  "site_id": "*"
                               })
     return schemas.Response(success=True, message="站点已重置！")
 

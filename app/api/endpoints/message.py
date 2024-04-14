@@ -43,13 +43,13 @@ async def user_message(background_tasks: BackgroundTasks, request: Request):
 
 
 @router.post("/web", summary="接收WEB消息", response_model=schemas.Response)
-async def web_message(text: str, current_user: User = Depends(get_current_active_superuser)):
+def web_message(text: str, current_user: User = Depends(get_current_active_superuser)):
     """
     WEB消息响应
     """
     MessageChain().handle_message(
         channel=MessageChannel.Web,
-        userid=current_user.id,
+        userid=current_user.name,
         username=current_user.name,
         text=text
     )
