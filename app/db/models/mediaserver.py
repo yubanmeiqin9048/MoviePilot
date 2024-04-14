@@ -58,11 +58,11 @@ class MediaServerItem(Base):
     @db_query
     def exist_by_tmdbid(db: Session, tmdbid: int, mtype: str):
         return db.query(MediaServerItem).filter(MediaServerItem.tmdbid == tmdbid,
-                                                MediaServerItem.item_type == mtype).first()
+                                                MediaServerItem.item_type == mtype).all()
 
     @staticmethod
     @db_query
     def exists_by_title(db: Session, title: str, mtype: str, year: str):
         return db.query(MediaServerItem).filter(MediaServerItem.title == title,
                                                 MediaServerItem.item_type == mtype,
-                                                MediaServerItem.year == str(year)).first()
+                                                MediaServerItem.year == str(year)).all()

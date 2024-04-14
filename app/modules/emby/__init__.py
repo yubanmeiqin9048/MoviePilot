@@ -58,16 +58,16 @@ class EmbyModule(_ModuleBase):
         """
         return self.emby.get_webhook_message(form, args)
 
-    def media_exists(self, mediainfo: MediaInfo, itemid: str = None) -> Optional[schemas.ExistMediaInfo]:
+    def media_exists(self, mediainfo: MediaInfo, itemid: List[str] = None) -> Optional[schemas.ExistMediaInfo]:
         """
         判断媒体文件是否存在
         :param mediainfo:  识别的媒体信息
-        :param itemid:  媒体服务器ItemID
+        :param itemid:  媒体服务器ItemID列表
         :return: 如不存在返回None，存在时返回信息，包括每季已存在所有集{type: movie/tv, seasons: {season: [episodes]}}
         """
         if mediainfo.type == MediaType.MOVIE:
-            if itemid:
-                movie = self.emby.get_iteminfo(itemid)
+            for id in itemid:
+                movie = self.emby.get_iteminfo(id)
                 if movie:
                     logger.info(f"媒体库中已存在：{movie}")
                     return schemas.ExistMediaInfo(
@@ -92,7 +92,7 @@ class EmbyModule(_ModuleBase):
             itemid, tvs = self.emby.get_tv_episodes(title=mediainfo.title,
                                                     year=mediainfo.year,
                                                     tmdb_id=mediainfo.tmdb_id,
-                                                    item_id=itemid)
+                                                    item_ids=itemid)
             if not tvs:
                 logger.info(f"{mediainfo.title_year} 在媒体库中不存在")
                 return None
@@ -102,7 +102,7 @@ class EmbyModule(_ModuleBase):
                     type=MediaType.TV,
                     seasons=tvs,
                     server="emby",
-                    itemid=itemid
+                    itemid=itemid[-1]
                 )
 
     def media_statistic(self) -> List[schemas.Statistic]:
@@ -144,7 +144,7 @@ class EmbyModule(_ModuleBase):
         """
         if server != "emby":
             return None
-        _, seasoninfo = self.emby.get_tv_episodes(item_id=item_id)
+        _, seasoninfo = self.emby.get_tv_episodes(item_ids=[item_id])
         if not seasoninfo:
             return []
         return [schemas.MediaServerSeasonInfo(
