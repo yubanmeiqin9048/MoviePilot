@@ -307,6 +307,7 @@ class Emby:
                         for res_item in res_items:
                             if res_item.get('Name') == name and (
                                     not year or str(res_item.get('ProductionYear')) == str(year)):
+                                item_ids.append(res_item.get('Id'))
         except Exception as e:
             logger.error(f"连接Items出错：" + str(e))
             return []
@@ -402,21 +403,21 @@ class Emby:
                 req_url = "%semby/Shows/%s/Episodes?Season=%s&IsMissing=false&api_key=%s" % (
                     self._host, item_id, season, self._apikey)
                 with RequestUtils().get_res(req_url) as res_json:
-                if res_json:
-                    tv_item = res_json.json()
-                    res_items = tv_item.get("Items")
-                    for res_item in res_items:
-                        season_index = res_item.get("ParentIndexNumber")
-                        if not season_index:
-                            continue
-                        if season and season != season_index:
-                            continue
-                        episode_index = res_item.get("IndexNumber")
-                        if not episode_index:
-                            continue
-                        if season_index not in season_episodes:
-                            season_episodes[season_index] = []
-                        season_episodes[season_index].append(episode_index)
+                    if res_json:
+                        tv_item = res_json.json()
+                        res_items = tv_item.get("Items")
+                        for res_item in res_items:
+                            season_index = res_item.get("ParentIndexNumber")
+                            if not season_index:
+                                continue
+                            if season and season != season_index:
+                                continue
+                            episode_index = res_item.get("IndexNumber")
+                            if not episode_index:
+                                continue
+                            if season_index not in season_episodes:
+                                season_episodes[season_index] = []
+                            season_episodes[season_index].append(episode_index)
             except Exception as e:
                 logger.error(f"连接Shows/Id/Episodes出错：" + str(e))
                 return None, None
