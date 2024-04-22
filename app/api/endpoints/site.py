@@ -12,6 +12,7 @@ from app.core.security import verify_token
 from app.db import get_db
 from app.db.models.site import Site
 from app.db.models.siteicon import SiteIcon
+from app.db.models.sitestatistic import SiteStatistic
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.sites import SitesHelper
 from app.scheduler import Scheduler
@@ -57,6 +58,7 @@ def add_site(
     site_in.url = f"{_scheme}://{_netloc}/"
     site_in.name = site_info.get("name")
     site_in.id = None
+    site_in.public = 1 if site_info.get("public") else 0
     site = Site(**site_in.dict())
     site.create(db)
     # 通知站点更新
@@ -237,6 +239,22 @@ def read_site_by_domain(
             detail=f"站点 {domain} 不存在",
         )
     return site
+
+
+@router.get("/statistic/{site_url}", summary="站点统计信息", response_model=schemas.SiteStatistic)
+def read_site_by_domain(
+        site_url: str,
+        db: Session = Depends(get_db),
+        _: schemas.TokenPayload = Depends(verify_token)
+) -> Any:
+    """
+    通过域名获取站点统计信息
+    """
+    domain = StringUtils.get_url_domain(site_url)
+    sitestatistic = SiteStatistic.get_by_domain(db, domain)
+    if sitestatistic:
+        return sitestatistic
+    return schemas.SiteStatistic(domain=domain)
 
 
 @router.get("/rss", summary="所有订阅站点", response_model=List[schemas.Site])
