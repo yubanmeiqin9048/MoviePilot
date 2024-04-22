@@ -131,6 +131,36 @@ class FilterModule(_ModuleBase):
             "include": [r'3D'],
             "exclude": []
         },
+        # 流媒体CR
+        "CR": {
+            "include": [r'CR'],
+            "exclude": []
+        },
+        # 流媒体B-GLOBAL
+        "BG": {
+            "include": [r'B-Global'],
+            "exclude": []
+        },
+        # 流媒体KKTV
+        "KKTV": {
+            "include": [r'KKTV'],
+            "exclude": []
+        },
+        # 流媒体NF
+        "NF": {
+            "include": [r'NF'],
+            "exclude": []
+        },
+        # 流媒体FIRDAY
+        "FIRDAY": {
+            "include": [r'firday'],
+            "exclude": []
+        },
+        # 流媒体baha
+        "BAHA": {
+            "include": [r'Baha'],
+            "exclude": []
+        }
     }
 
     def init_module(self) -> None:
