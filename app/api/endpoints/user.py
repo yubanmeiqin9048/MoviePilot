@@ -1,6 +1,6 @@
 import base64
 import re
-from typing import Any, List
+from typing import Any, List, Union
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ from app.core.security import get_password_hash
 from app.db import get_db
 from app.db.models.user import User
 from app.db.userauth import get_current_active_superuser, get_current_active_user
+from app.db.userconfig_oper import UserConfigOper
 from app.utils.otp import OtpUtils
 
 router = APIRouter()
@@ -140,6 +141,28 @@ def otp_enable(userid: str, db: Session = Depends(get_db)) -> Any:
     if not user:
         return schemas.Response(success=False, message="用户不存在")
     return schemas.Response(success=user.is_otp)
+
+
+@router.get("/config/{key}", summary="查询用户配置", response_model=schemas.Response)
+def get_config(key: str,
+               current_user: User = Depends(get_current_active_user)):
+    """
+    查询用户配置
+    """
+    value = UserConfigOper().get(username=current_user.name, key=key)
+    return schemas.Response(success=True, data={
+        "value": value
+    })
+
+
+@router.post("/config/{key}", summary="更新用户配置", response_model=schemas.Response)
+def set_config(key: str, value: Union[list, dict, bool, int, str] = None,
+               current_user: User = Depends(get_current_active_user)):
+    """
+    更新用户配置
+    """
+    UserConfigOper().set(username=current_user.name, key=key, value=value)
+    return schemas.Response(success=True)
 
 
 @router.delete("/{user_name}", summary="删除用户", response_model=schemas.Response)
