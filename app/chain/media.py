@@ -156,9 +156,9 @@ class MediaChain(ChainBase, metaclass=Singleton):
         # 返回上下文
         return Context(meta_info=file_meta, media_info=mediainfo)
 
-    def search(self, title: str) -> Tuple[MetaBase, List[MediaInfo]]:
+    def search(self, title: str) -> Tuple[Optional[MetaBase], List[MediaInfo]]:
         """
-        搜索媒体信息
+        搜索媒体/人物信息
         :param title: 搜索内容
         :return: 识别元数据，媒体信息列表
         """

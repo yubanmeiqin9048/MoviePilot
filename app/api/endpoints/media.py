@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Any
+from typing import List, Any, Union
 
 from fastapi import APIRouter, Depends
 
@@ -63,18 +63,38 @@ def recognize_file2(path: str,
     return recognize_file(path)
 
 
-@router.get("/search", summary="搜索媒体信息", response_model=List[schemas.MediaInfo])
-def search_by_title(title: str,
-                    page: int = 1,
-                    count: int = 8,
-                    _: schemas.TokenPayload = Depends(verify_token)) -> Any:
+@router.get("/search", summary="搜索媒体/人物信息", response_model=List[dict])
+def search(title: str,
+           type: str = "media",
+           page: int = 1,
+           count: int = 8,
+           _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
-    模糊搜索媒体信息列表
+    模糊搜索媒体/人物信息列表 media：媒体信息，person：人物信息
     """
-    _, medias = MediaChain().search(title=title)
-    if medias:
-        return [media.to_dict() for media in medias[(page - 1) * count: page * count]]
-    return []
+    def __get_source(obj: Union[dict, schemas.MediaPerson]):
+        """
+        获取对象属性
+        """
+        if isinstance(obj, dict):
+            return obj.get("source")
+        return obj.source
+
+    result = []
+    if type == "media":
+        _, medias = MediaChain().search(title=title)
+        if medias:
+            result = [media.to_dict() for media in medias]
+    else:
+        result = MediaChain().search_persons(name=title)
+    if result:
+        # 按设置的顺序对结果进行排序
+        setting_order = settings.SEARCH_SOURCE.split(',') or []
+        sort_order = {}
+        for index, source in enumerate(setting_order):
+            sort_order[source] = index
+        result = sorted(result, key=lambda x: sort_order.get(__get_source(x), 4))
+    return result[(page - 1) * count:page * count]
 
 
 @router.get("/scrape", summary="刮削媒体信息", response_model=schemas.Response)

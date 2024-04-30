@@ -12,11 +12,14 @@ class BangumiApi(object):
     """
 
     _urls = {
+        "search": "search/subjects/%s?type=2",
         "calendar": "calendar",
         "detail": "v0/subjects/%s",
-        "persons": "v0/subjects/%s/persons",
+        "credits": "v0/subjects/%s/persons",
         "subjects": "v0/subjects/%s/subjects",
-        "characters": "v0/subjects/%s/characters"
+        "characters": "v0/subjects/%s/characters",
+        "person_detail": "v0/persons/%s",
+        "person_credits": "v0/persons/%s/subjects",
     }
     _base_url = "https://api.bgm.tv/"
     _req = RequestUtils(session=requests.Session())
@@ -38,7 +41,16 @@ class BangumiApi(object):
             print(e)
             return None
 
-    def calendar(self, page: int = 1, count: int = 30):
+    def search(self, name):
+        """
+        搜索媒体信息
+        """
+        result = self.__invoke("search/subject/%s" % name)
+        if result:
+            return result.get("list")
+        return []
+
+    def calendar(self):
         """
         获取每日放送，返回items
         """
@@ -134,7 +146,7 @@ class BangumiApi(object):
         if result:
             for item in result:
                 ret_list.extend(item.get("items") or [])
-        return ret_list[(page - 1) * count: page * count]
+        return ret_list
 
     def detail(self, bid: int):
         """
@@ -142,7 +154,7 @@ class BangumiApi(object):
         """
         return self.__invoke(self._urls["detail"] % bid, _ts=datetime.strftime(datetime.now(), '%Y%m%d'))
 
-    def persons(self, bid: int):
+    def credits(self, bid: int):
         """
         获取番剧人物
         """
@@ -163,3 +175,20 @@ class BangumiApi(object):
         获取关联条目信息
         """
         return self.__invoke(self._urls["subjects"] % bid, _ts=datetime.strftime(datetime.now(), '%Y%m%d'))
+
+    def person_detail(self, person_id: int):
+        """
+        获取人物详细信息
+        """
+        return self.__invoke(self._urls["person_detail"] % person_id, _ts=datetime.strftime(datetime.now(), '%Y%m%d'))
+
+    def person_credits(self, person_id: int):
+        """
+        获取人物参演作品
+        """
+        ret_list = []
+        result = self.__invoke(self._urls["person_credits"] % person_id, _ts=datetime.strftime(datetime.now(), '%Y%m%d'))
+        if result:
+            for item in result:
+                ret_list.append(item)
+        return ret_list

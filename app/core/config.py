@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     PROJECT_NAME = "MoviePilot"
     # API路径
     API_V1_STR: str = "/api/v1"
+    # 前端资源路径
+    FRONTEND_PATH: str = "/public"
     # 密钥
     SECRET_KEY: str = secrets.token_urlsafe(32)
     # 允许的域名
@@ -41,6 +43,8 @@ class Settings(BaseSettings):
     WALLPAPER: str = "tmdb"
     # 网络代理 IP:PORT
     PROXY_HOST: Optional[str] = None
+    # 媒体搜索来源 themoviedb/douban/bangumi，多个用,分隔
+    SEARCH_SOURCE: str = "themoviedb,douban,bangumi"
     # 媒体识别来源 themoviedb/douban
     RECOGNIZE_SOURCE: str = "themoviedb"
     # 刮削来源 themoviedb/douban

@@ -105,9 +105,14 @@ class SiteChain(ChainBase):
         """
         user_agent = site.ua or settings.USER_AGENT
         url = f"{site.url}api/member/profile"
+        headers = {
+                "Content-Type": "application/json",
+                "User-Agent": user_agent,
+                "Accept": "application/json, text/plain, */*",
+                "Authorization": site.token
+            }
         res = RequestUtils(
-            ua=user_agent,
-            cookies=site.cookie,
+            headers=headers,
             proxies=settings.PROXY if site.proxy else None,
             timeout=15
         ).post_res(url=url)
@@ -115,8 +120,7 @@ class SiteChain(ChainBase):
             user_info = res.json()
             if user_info and user_info.get("data"):
                 # 更新最后访问时间
-                res = RequestUtils(cookies=site.cookie,
-                                   ua=user_agent,
+                res = RequestUtils(headers=headers,
                                    timeout=60,
                                    proxies=settings.PROXY if site.proxy else None,
                                    referer=f"{site.url}index"
@@ -125,7 +129,7 @@ class SiteChain(ChainBase):
                     return True, "连接成功"
                 else:
                     return True, f"连接成功，但更新状态失败"
-        return False, "Cookie已失效"
+        return False, "鉴权已过期或无效"
 
     def __ptlsp_test(self, site: Site) -> Tuple[bool, str]:
         """

@@ -16,6 +16,8 @@ class Plugin(BaseModel):
     plugin_icon: Optional[str] = None
     # 插件版本
     plugin_version: Optional[str] = None
+    # 插件标签
+    plugin_label: Optional[str] = None
     # 插件作者
     plugin_author: Optional[str] = None
     # 作者主页
@@ -42,3 +44,5 @@ class Plugin(BaseModel):
     install_count: Optional[int] = 0
     # 更新记录
     history: Optional[dict] = {}
+    # 添加时间，值越小表示越靠后发布
+    add_time: Optional[int] = 0

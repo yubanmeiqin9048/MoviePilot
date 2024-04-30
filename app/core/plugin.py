@@ -353,6 +353,7 @@ class PluginManager(metaclass=Singleton):
                 logger.warn(f"获取插件库失败：{market}")
                 return
             ret_plugins = []
+            add_time = len(online_plugins)
             for pid, plugin_info in online_plugins.items():
                 # 运行状插件
                 plugin_obj = self._running_plugins.get(pid)
@@ -406,6 +407,9 @@ class PluginManager(metaclass=Singleton):
                 # 图标
                 if plugin_info.get("icon"):
                     plugin.plugin_icon = plugin_info.get("icon")
+                # 标签
+                if plugin_info.get("labels"):
+                    plugin.plugin_label = plugin_info.get("labels")
                 # 作者
                 if plugin_info.get("author"):
                     plugin.plugin_author = plugin_info.get("author")
@@ -416,8 +420,11 @@ class PluginManager(metaclass=Singleton):
                 plugin.repo_url = market
                 # 本地标志
                 plugin.is_local = False
+                # 添加顺序
+                plugin.add_time = add_time
                 # 汇总
                 ret_plugins.append(plugin)
+                add_time -= 1
 
             return ret_plugins
 
@@ -510,12 +517,17 @@ class PluginManager(metaclass=Singleton):
             # 作者链接
             if hasattr(plugin_class, "author_url"):
                 plugin.author_url = plugin_class.author_url
+            # 加载顺序
+            if hasattr(plugin_class, "plugin_order"):
+                plugin.plugin_order = plugin_class.plugin_order
             # 是否需要更新
             plugin.has_update = False
             # 本地标志
             plugin.is_local = True
             # 汇总
             plugins.append(plugin)
+        # 根据加载排序重新排序
+        plugins.sort(key=lambda x: x.plugin_order if hasattr(x, "plugin_order") else 0)
         return plugins
 
     @staticmethod
