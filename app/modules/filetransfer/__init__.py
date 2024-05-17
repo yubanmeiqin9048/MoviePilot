@@ -230,7 +230,7 @@ class FileTransferModule(_ModuleBase):
                     file_ext = file_item.suffix
                     new_sub_tag_dict = {
                         ".eng": ".英文",
-                        ".chi.zh-cn": ".简体中文",
+                        ".chi.zh-cn.default": ".简体中文",
                         ".zh-tw": ".繁体中文"
                     }
                     new_sub_tag_list = [
