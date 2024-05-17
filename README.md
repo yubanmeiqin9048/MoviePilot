@@ -82,7 +82,7 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 - **❗AUTH_SITE：** 认证站点（认证通过后才能使用站点相关功能），支持配置多个认证站点，使用`,`分隔，如：`iyuu,hhclub`，会依次执行认证操作，直到有一个站点认证成功。  
 
     配置`AUTH_SITE`后，需要根据下表配置对应站点的认证参数。
-    认证资源`v1.2.4+`支持：`iyuu`/`hhclub`/`audiences`/`hddolby`/`zmpt`/`freefarm`/`hdfans`/`wintersakura`/`leaves`/`ptba` /`icc2022`/`ptlsp`/`xingtan`/`ptvicomo`/`agsvpt`/`hdkyl`/`qingwa`
+    认证资源`v1.2.8+`支持：`iyuu`/`hhclub`/`audiences`/`hddolby`/`zmpt`/`freefarm`/`hdfans`/`wintersakura`/`leaves`/`ptba` /`icc2022`/`ptlsp`/`xingtan`/`ptvicomo`/`agsvpt`/`hdkyl`/`qingwa`/`discfan`
   
     |      站点      |                          参数                           |
     |:------------:|:-----------------------------------------------------:|
@@ -103,6 +103,7 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
     |    agsvpt    |       `AGSVPT_UID`：用户ID<br/>`AGSVPT_PASSKEY`：密钥       |
     |    hdkyl     |        `HDKYL_UID`：用户ID<br/>`HDKYL_PASSKEY`：密钥        |
     |   qingwa    |      `QINGWA_UID`：用户ID<br/>`QINGWA_PASSKEY`：密钥      |
+    |   discfan    |      `DISCFAN_UID`：用户ID<br/>`DISCFAN_PASSKEY`：密钥      |
 
 
 ### 2. **环境变量 / 配置文件**
@@ -115,7 +116,8 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 - **DOH_ENABLE：** DNS over HTTPS开关，`true`/`false`，默认`true`，开启后会使用DOH对api.themoviedb.org等域名进行解析，以减少被DNS污染的情况，提升网络连通性
 - **META_CACHE_EXPIRE：** 元数据识别缓存过期时间（小时），数字型，不配置或者配置为0时使用系统默认（大内存模式为7天，否则为3天），调大该值可减少themoviedb的访问次数
 - **GITHUB_TOKEN：** Github token，提高自动更新、插件安装等请求Github Api的限流阈值，格式：ghp_****
-- **DEV:** 开发者模式，`true`/`false`，默认`false`，开启后会暂停所有定时任务
+- **DEV:** 开发者模式，`true`/`false`，默认`false`，仅用于本地开发使用，开启后会暂停所有定时任务，且插件代码文件的修改无需重启会自动重载生效
+- **PLUGIN_AUTO_RELOAD:** 插件热加载，`true`/`false`，默认`false`，开启后插件代码文件的修改无需重启会自动重载生效
 - **AUTO_UPDATE_RESOURCE**：启动时自动检测和更新资源包（站点索引及认证等），`true`/`false`，默认`true`，需要能正常连接Github，仅支持Docker镜像
 ---
 - **TMDB_API_DOMAIN：** TMDB API地址，默认`api.themoviedb.org`，也可配置为`api.tmdb.org`、`tmdb.movie-pilot.org` 或其它中转代理服务地址，能连通即可
@@ -127,12 +129,12 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 - **SCRAP_FOLLOW_TMDB：** 新增已入库媒体是否跟随TMDB信息变化，`true`/`false`，默认`true`，为`false`时即使TMDB信息变化了也会仍然按历史记录中已入库的信息进行刮削
 ---
 - **AUTO_DOWNLOAD_USER：** 远程交互搜索时自动择优下载的用户ID（消息通知渠道的用户ID），多个用户使用,分割，设置为 all 代表全部用户自动择优下载，未设置需要手动选择资源或者回复`0`才自动择优下载
+- **DOWNLOAD_SUBTITLE：** 下载站点字幕，`true`/`false`，默认`true`
+- **SEARCH_MULTIPLE_NAME：** 搜索时是否使用多个名称搜索，`true`/`false`，默认`false`，开启后会使用多个名称进行搜索，搜索结果会更全面，但会增加搜索时间；关闭时只要其中一个名称搜索到结果或全部名称搜索完毕即停止
+- **SUBSCRIBE_STATISTIC_SHARE：** 是否匿名分享订阅数据，用于统计和展示用户热门订阅，`true`/`false`，默认`true`
+- **PLUGIN_STATISTIC_SHARE：** 是否匿名分享插件安装统计数据，用于统计和显示插件下载安装次数，`true`/`false`，默认`true`
 ---
 - **OCR_HOST：** OCR识别服务器地址，格式：`http(s)://ip:port`，用于识别站点验证码实现自动登录获取Cookie等，不配置默认使用内建服务器`https://movie-pilot.org`，可使用 [这个镜像](https://hub.docker.com/r/jxxghp/moviepilot-ocr) 自行搭建。
----
-- **DOWNLOAD_SUBTITLE：** 下载站点字幕，`true`/`false`，默认`true`
----
-- **SEARCH_MULTIPLE_NAME：** 搜索时是否使用多个名称搜索，`true`/`false`，默认`false`，开启后会使用多个名称进行搜索，搜索结果会更全面，但会增加搜索时间；关闭时只要其中一个名称搜索到结果或全部名称搜索完毕即停止
 ---
 - **MOVIE_RENAME_FORMAT：** 电影重命名格式，基于jinjia2语法
 
@@ -190,8 +192,12 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 
 ### 4. **插件扩展**
 
-- **PLUGIN_MARKET：** 插件市场仓库地址，仅支持Github仓库`main`分支，多个地址使用`,`分隔，默认为官方插件仓库：`https://github.com/jxxghp/MoviePilot-Plugins` ，通过查看[MoviePilot-Plugins](https://github.com/jxxghp/MoviePilot-Plugins)项目的fork，或者查看频道置顶了解更多第三方插件仓库。
-
+- **PLUGIN_MARKET：** 插件市场仓库地址，仅支持Github仓库`main`分支，多个地址使用`,`分隔，通过查看[MoviePilot-Plugins](https://github.com/jxxghp/MoviePilot-Plugins)项目的fork，或者查看频道置顶了解更多第三方插件仓库，目前已有 `130+` 插件。 
+  默认已内置以下插件库：
+  1. https://github.com/jxxghp/MoviePilot-Plugins
+  2. https://github.com/thsrite/MoviePilot-Plugins
+  3. https://github.com/honue/MoviePilot-Plugins
+  4. https://github.com/InfinityPacer/MoviePilot-Plugins
 
 ## 使用
 
@@ -259,9 +265,15 @@ sudo sysctl -p
 
 ![image](https://github.com/jxxghp/MoviePilot/assets/51039935/f2654b09-26f3-464f-a0af-1de3f97832ee)
 
-![image](https://github.com/jxxghp/MoviePilot/assets/51039935/fcb87529-56dd-43df-8337-6e34b8582819)
+![mp1](https://github.com/jxxghp/MoviePilot/assets/51039935/123a39cd-11b6-4bd3-b3a3-e3e1103416b9)
 
-![image](https://github.com/jxxghp/MoviePilot/assets/51039935/bfa77c71-510a-46a6-9c1e-cf98cb101e3a)
+![mp2](https://github.com/jxxghp/MoviePilot/assets/51039935/230de330-8162-4314-a897-0bce9b1e5d00)
 
-![image](https://github.com/jxxghp/MoviePilot/assets/51039935/51cafd09-e38c-47f9-ae62-1e83ab8bf89b)
+![mp3](https://github.com/jxxghp/MoviePilot/assets/51039935/de678f45-bbe4-4bdc-aefc-cc5ae774a726)
+
+![mp4](https://github.com/jxxghp/MoviePilot/assets/51039935/8bc6a0a5-7c57-464f-ae63-d6241310dc43)
+
+
+
+
 

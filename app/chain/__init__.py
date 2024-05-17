@@ -92,7 +92,7 @@ class ChainBase(metaclass=ABCMeta):
 
         logger.debug(f"请求模块执行：{method} ...")
         result = None
-        modules = self.modulemanager.get_modules(method)
+        modules = self.modulemanager.get_running_modules(method)
         for module in modules:
             try:
                 func = getattr(module, method)
@@ -113,6 +113,9 @@ class ChainBase(metaclass=ABCMeta):
             except Exception as err:
                 logger.error(
                     f"运行模块 {method} 出错：{module.__class__.__name__} - {str(err)}\n{traceback.format_exc()}")
+                self.messagehelper.put(title=f"{module.__class__.__name__} 模块执行出错",
+                                       message=str(err),
+                                       role="system")
         return result
 
     def recognize_media(self, meta: MetaBase = None,

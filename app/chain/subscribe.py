@@ -19,6 +19,7 @@ from app.db.subscribe_oper import SubscribeOper
 from app.db.subscribehistory_oper import SubscribeHistoryOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.message import MessageHelper
+from app.helper.subscribe import SubscribeHelper
 from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import NotExistMediaInfo, Notification
@@ -36,6 +37,7 @@ class SubscribeChain(ChainBase):
         self.searchchain = SearchChain()
         self.subscribeoper = SubscribeOper()
         self.subscribehistoryoper = SubscribeHistoryOper()
+        self.subscribehelper = SubscribeHelper()
         self.torrentschain = TorrentsChain()
         self.mediachain = MediaChain()
         self.message = MessageHelper()
@@ -122,6 +124,9 @@ class SubscribeChain(ChainBase):
                 kwargs.update({
                     'lack_episode': kwargs.get('total_episode')
                 })
+        else:
+            # 避免season为0的问题
+            season = None
         # 更新媒体图片
         self.obtain_images(mediainfo=mediainfo)
         # 合并信息
@@ -136,7 +141,7 @@ class SubscribeChain(ChainBase):
             'effect': self.__get_default_subscribe_config(mediainfo.type, "effect"),
             'include': self.__get_default_subscribe_config(mediainfo.type, "include"),
             'exclude': self.__get_default_subscribe_config(mediainfo.type, "exclude"),
-            'best_version': self.__get_default_subscribe_config(mediainfo.type, "best_version"),
+            'best_version': self.__get_default_subscribe_config(mediainfo.type, "best_version") if kwargs.get("best_version") is None else kwargs.get("best_version"),
             'search_imdbid': self.__get_default_subscribe_config(mediainfo.type, "search_imdbid"),
             'sites': self.__get_default_subscribe_config(mediainfo.type, "sites") or None,
             'save_path': self.__get_default_subscribe_config(mediainfo.type, "save_path"),
@@ -153,6 +158,7 @@ class SubscribeChain(ChainBase):
                                                text=f"{err_msg}",
                                                image=mediainfo.get_message_image(),
                                                userid=userid))
+            return None, err_msg
         elif message:
             logger.info(f'{mediainfo.title_year} {metainfo.season} 添加订阅成功')
             if username:
@@ -164,12 +170,28 @@ class SubscribeChain(ChainBase):
                                            title=f"{mediainfo.title_year} {metainfo.season} 已添加订阅",
                                            text=text,
                                            image=mediainfo.get_message_image()))
-            # 发送事件
-            EventManager().send_event(EventType.SubscribeAdded, {
-                "subscribe_id": sid,
-                "username": username,
-                "mediainfo": mediainfo.to_dict(),
-            })
+        # 发送事件
+        EventManager().send_event(EventType.SubscribeAdded, {
+            "subscribe_id": sid,
+            "username": username,
+            "mediainfo": mediainfo.to_dict(),
+        })
+        # 统计订阅
+        self.subscribehelper.sub_reg_async({
+            "name": title,
+            "year": year,
+            "type": metainfo.type.value,
+            "tmdbid": mediainfo.tmdb_id,
+            "imdbid": mediainfo.imdb_id,
+            "tvdbid": mediainfo.tvdb_id,
+            "doubanid": mediainfo.douban_id,
+            "bangumiid": mediainfo.bangumi_id,
+            "season": metainfo.begin_season,
+            "poster": mediainfo.get_poster_image(),
+            "backdrop": mediainfo.get_backdrop_image(),
+            "vote": mediainfo.vote_average,
+            "description": mediainfo.overview
+        })
         # 返回结果
         return sid, ""
 
@@ -356,9 +378,9 @@ class SubscribeChain(ChainBase):
         # 手动触发时发送系统消息
         if manual:
             if sid:
-                self.message.put(f'订阅 {subscribes[0].name} 搜索完成！')
+                self.message.put(f'{subscribes[0].name} 搜索完成！', title="订阅搜索", role="system")
             else:
-                self.message.put('所有订阅搜索完成！')
+                self.message.put('所有订阅搜索完成！', title="订阅搜索", role="system")
 
     def update_subscribe_priority(self, subscribe: Subscribe, meta: MetaInfo,
                                   mediainfo: MediaInfo, downloads: List[Context]):
@@ -476,6 +498,7 @@ class SubscribeChain(ChainBase):
             "tv_size": default_rule.get("tv_size"),
             "movie_size": default_rule.get("movie_size"),
             "min_seeders": default_rule.get("min_seeders"),
+            "min_seeders_time": default_rule.get("min_seeders_time"),
         }
 
     def match(self, torrents: Dict[str, List[Context]]):
@@ -849,6 +872,11 @@ class SubscribeChain(ChainBase):
             "subscribe_info": subscribe.to_dict(),
             "mediainfo": mediainfo.to_dict(),
         })
+        # 统计订阅
+        self.subscribehelper.sub_done_async({
+            "tmdbid": mediainfo.tmdb_id,
+            "doubanid": mediainfo.douban_id
+        })
 
     def remote_list(self, channel: MessageChannel, userid: Union[str, int] = None):
         """
@@ -898,6 +926,11 @@ class SubscribeChain(ChainBase):
                 return
             # 删除订阅
             self.subscribeoper.delete(subscribe_id)
+            # 统计订阅
+            self.subscribehelper.sub_done_async({
+                "tmdbid": subscribe.tmdbid,
+                "doubanid": subscribe.doubanid
+            })
         # 重新发送消息
         self.remote_list(channel, userid)
 

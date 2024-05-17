@@ -38,15 +38,19 @@ class DoubanModule(_ModuleBase):
         """
         测试模块连接性
         """
-        with RequestUtils().get_res("https://movie.douban.com/") as ret:
-            if ret and ret.status_code == 200:
-                return True, ""
-            elif ret:
-                return False, f"无法连接豆瓣，错误码：{ret.status_code}"
+        ret = RequestUtils().get_res("https://movie.douban.com/")
+        if ret and ret.status_code == 200:
+            return True, ""
+        elif ret:
+            return False, f"无法连接豆瓣，错误码：{ret.status_code}"
         return False, "豆瓣网络连接失败"
 
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
+
+    @staticmethod
+    def get_name() -> str:
+        return "豆瓣"
 
     def recognize_media(self, meta: MetaBase = None,
                         mtype: MediaType = None,
@@ -557,6 +561,8 @@ class DoubanModule(_ModuleBase):
             if meta.type and meta.type != MediaType.UNKNOWN and meta.type.value != item_obj.get("type_name"):
                 continue
             if item_obj.get("type_name") not in (MediaType.TV.value, MediaType.MOVIE.value):
+                continue
+            if meta.name not in item_obj.get("target", {}).get("title"):
                 continue
             ret_medias.append(MediaInfo(douban_info=item_obj.get("target")))
         # 将搜索词中的季写入标题中

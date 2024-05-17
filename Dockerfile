@@ -1,4 +1,4 @@
-FROM python:3.11.4-slim-bullseye
+FROM python:3.11.4-slim-bookworm
 ARG MOVIEPILOT_VERSION
 ENV LANG="C.UTF-8" \
     TZ="Asia/Shanghai" \
@@ -16,6 +16,7 @@ ENV LANG="C.UTF-8" \
     IYUU_SIGN=""
 WORKDIR "/app"
 RUN apt-get update -y \
+    && apt-get upgrade -y \
     && apt-get -y install \
         musl-dev \
         nginx \

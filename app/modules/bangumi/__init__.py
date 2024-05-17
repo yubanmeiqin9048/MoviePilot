@@ -23,15 +23,19 @@ class BangumiModule(_ModuleBase):
         """
         测试模块连接性
         """
-        with RequestUtils().get_res("https://api.bgm.tv/") as ret:
-            if ret and ret.status_code == 200:
-                return True, ""
-            elif ret:
-                return False, f"无法连接Bangumi，错误码：{ret.status_code}"
+        ret = RequestUtils().get_res("https://api.bgm.tv/")
+        if ret and ret.status_code == 200:
+            return True, ""
+        elif ret:
+            return False, f"无法连接Bangumi，错误码：{ret.status_code}"
         return False, "Bangumi网络连接失败"
 
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
+
+    @staticmethod
+    def get_name() -> str:
+        return "Bangumi"
 
     def recognize_media(self, bangumiid: int = None,
                         **kwargs) -> Optional[MediaInfo]:
@@ -68,7 +72,9 @@ class BangumiModule(_ModuleBase):
             return []
         infos = self.bangumiapi.search(meta.name)
         if infos:
-            return [MediaInfo(bangumi_info=info) for info in infos]
+            return [MediaInfo(bangumi_info=info) for info in infos
+                    if meta.name.lower() in str(info.get("name")).lower()
+                    or meta.name.lower() in str(info.get("name_cn")).lower()]
         return []
 
     def bangumi_info(self, bangumiid: int) -> Optional[dict]:

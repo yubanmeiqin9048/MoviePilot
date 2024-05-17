@@ -1,7 +1,14 @@
 import concurrent
 import concurrent.futures
+import inspect
+import os
+import threading
+import time
 import traceback
-from typing import List, Any, Dict, Tuple, Optional
+from typing import List, Any, Dict, Tuple, Optional, Callable
+
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 from app import schemas
 from app.core.config import settings
@@ -18,6 +25,59 @@ from app.utils.string import StringUtils
 from app.utils.system import SystemUtils
 
 
+class PluginMonitorHandler(FileSystemEventHandler):
+
+    # 计时器
+    __reload_timer = None
+    # 防抖时间间隔
+    __debounce_interval = 0.5
+    # 最近一次修改时间
+    __last_modified = 0
+    # 修改间隔
+    __timeout = 2
+
+    def on_modified(self, event):
+        """
+        插件文件修改后重载
+        """
+        if event.is_directory:
+            return
+        current_time = time.time()
+        if current_time - self.__last_modified < self.__timeout:
+            return
+        self.__last_modified = current_time
+        # 读取插件根目录下的__init__.py文件，读取class XXXX(_PluginBase)的类名
+        try:
+            # 使用os.path和pathlib处理跨平台的路径问题
+            plugin_dir = event.src_path.split("plugins" + os.sep)[1].split(os.sep)[0]
+            init_file = settings.ROOT_PATH / "app" / "plugins" / plugin_dir / "__init__.py"
+            with open(init_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            pid = None
+            for line in lines:
+                if line.startswith("class") and "(_PluginBase)" in line:
+                    pid = line.split("class ")[1].split("(_PluginBase)")[0]
+            if pid:
+                # 防抖处理，通过计时器延迟加载
+                if self.__reload_timer:
+                    self.__reload_timer.cancel()
+                self.__reload_timer = threading.Timer(self.__debounce_interval, self.__reload_plugin, [pid])
+                self.__reload_timer.start()
+        except Exception as e:
+            logger.error(f"插件文件修改后重载出错：{str(e)}")
+
+    @staticmethod
+    def __reload_plugin(pid):
+        """
+        重新加载插件
+        """
+        try:
+            logger.info(f"插件 {pid} 文件修改，重新加载...")
+            PluginManager().reload_plugin(pid)
+        except Exception as e:
+            logger.error(f"插件文件修改后重载出错：{str(e)}")
+
+
 class PluginManager(metaclass=Singleton):
     """
     插件管理器
@@ -30,11 +90,16 @@ class PluginManager(metaclass=Singleton):
     _running_plugins: dict = {}
     # 配置Key
     _config_key: str = "plugin.%s"
+    # 监听器
+    _observer: Observer = None
 
     def __init__(self):
         self.siteshelper = SitesHelper()
         self.pluginhelper = PluginHelper()
         self.systemconfig = SystemConfigOper()
+        # 开发者模式监测插件修改
+        if settings.DEV or settings.PLUGIN_AUTO_RELOAD:
+            self.__start_monitor()
 
     def init_config(self):
         # 停止已有插件
@@ -47,11 +112,28 @@ class PluginManager(metaclass=Singleton):
         启动加载插件
         :param pid: 插件ID，为空加载所有插件
         """
+
+        def check_module(module: Any):
+            """
+            检查模块
+            """
+            if not hasattr(module, 'init_plugin') or not hasattr(module, "plugin_name"):
+                return False
+            return True
+
         # 扫描插件目录
-        plugins = ModuleHelper.load(
-            "app.plugins",
-            filter_func=lambda _, obj: hasattr(obj, 'init_plugin') and hasattr(obj, "plugin_name")
-        )
+        if pid:
+            # 加载指定插件
+            plugins = ModuleHelper.load_with_pre_filter(
+                "app.plugins",
+                filter_func=lambda name, obj: check_module(obj) and name == pid
+            )
+        else:
+            # 加载所有插件
+            plugins = ModuleHelper.load(
+                "app.plugins",
+                filter_func=lambda _, obj: check_module(obj)
+            )
         # 已安装插件
         installed_plugins = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins) or []
         # 排序
@@ -120,6 +202,26 @@ class PluginManager(metaclass=Singleton):
             # 清空
             self._plugins = {}
             self._running_plugins = {}
+
+    def __start_monitor(self):
+        """
+        开发者模式下监测插件文件修改
+        """
+        logger.info("开发者模式下开始监测插件文件修改...")
+        monitor_handler = PluginMonitorHandler()
+        self._observer = Observer()
+        self._observer.schedule(monitor_handler, str(settings.ROOT_PATH / "app" / "plugins"), recursive=True)
+        self._observer.start()
+
+    def stop_monitor(self):
+        """
+        停止监测插件修改
+        """
+        # 停止监测
+        if self._observer:
+            logger.info("正在停止监测插件文件修改...")
+            self._observer.stop()
+            self._observer.join()
 
     @staticmethod
     def __stop_plugin(plugin: Any):
@@ -217,10 +319,11 @@ class PluginManager(metaclass=Singleton):
         获取插件表单
         :param pid: 插件ID
         """
-        if not self._running_plugins.get(pid):
+        plugin = self._running_plugins.get(pid)
+        if not plugin:
             return [], {}
-        if hasattr(self._running_plugins[pid], "get_form"):
-            return self._running_plugins[pid].get_form() or ([], {})
+        if hasattr(plugin, "get_form"):
+            return plugin.get_form() or ([], {})
         return [], {}
 
     def get_plugin_page(self, pid: str) -> List[dict]:
@@ -228,11 +331,44 @@ class PluginManager(metaclass=Singleton):
         获取插件页面
         :param pid: 插件ID
         """
-        if not self._running_plugins.get(pid):
+        plugin = self._running_plugins.get(pid)
+        if not plugin:
             return []
-        if hasattr(self._running_plugins[pid], "get_page"):
-            return self._running_plugins[pid].get_page() or []
+        if hasattr(plugin, "get_page"):
+            return plugin.get_page() or []
         return []
+
+    def get_plugin_dashboard(self, pid: str, **kwargs) -> Optional[schemas.PluginDashboard]:
+        """
+        获取插件仪表盘
+        :param pid: 插件ID
+        """
+        def __get_params_count(func: Callable):
+            """
+            获取函数的参数信息
+            """
+            signature = inspect.signature(func)
+            return len(signature.parameters)
+
+        plugin = self._running_plugins.get(pid)
+        if not plugin:
+            return None
+        if hasattr(plugin, "get_dashboard"):
+            # 检查方法的参数个数
+            if __get_params_count(plugin.get_dashboard) > 0:
+                dashboard: Tuple = plugin.get_dashboard(**kwargs)
+            else:
+                dashboard: Tuple = plugin.get_dashboard()
+            if dashboard:
+                cols, attrs, elements = dashboard
+                return schemas.PluginDashboard(
+                    id=pid,
+                    name=plugin.plugin_name,
+                    cols=cols or {},
+                    elements=elements,
+                    attrs=attrs or {}
+                )
+        return None
 
     def get_plugin_commands(self) -> List[Dict[str, Any]]:
         """
@@ -254,7 +390,7 @@ class PluginManager(metaclass=Singleton):
                     logger.error(f"获取插件命令出错：{str(e)}")
         return ret_commands
 
-    def get_plugin_apis(self) -> List[Dict[str, Any]]:
+    def get_plugin_apis(self, plugin_id: str = None) -> List[Dict[str, Any]]:
         """
         获取插件API
         [{
@@ -267,6 +403,8 @@ class PluginManager(metaclass=Singleton):
         """
         ret_apis = []
         for pid, plugin in self._running_plugins.items():
+            if plugin_id and pid != plugin_id:
+                continue
             if hasattr(plugin, "get_api") \
                     and ObjectUtils.check_method(plugin.get_api):
                 try:
@@ -301,17 +439,37 @@ class PluginManager(metaclass=Singleton):
                     logger.error(f"获取插件 {pid} 服务出错：{str(e)}")
         return ret_services
 
+    def get_dashboard_plugins(self) -> List[dict]:
+        """
+        获取有仪表盘的插件列表
+        """
+        dashboards = []
+        for pid, plugin in self._running_plugins.items():
+            if hasattr(plugin, "get_dashboard") \
+                    and ObjectUtils.check_method(plugin.get_dashboard):
+                try:
+                    if not plugin.get_state():
+                        continue
+                    dashboards.append({
+                        "id": pid,
+                        "name": plugin.plugin_name
+                    })
+                except Exception as e:
+                    logger.error(f"获取有仪表盘的插件出错：{str(e)}")
+        return dashboards
+
     def get_plugin_attr(self, pid: str, attr: str) -> Any:
         """
         获取插件属性
         :param pid: 插件ID
         :param attr: 属性名
         """
-        if not self._running_plugins.get(pid):
+        plugin = self._running_plugins.get(pid)
+        if not plugin:
             return None
-        if not hasattr(self._running_plugins[pid], attr):
+        if not hasattr(plugin, attr):
             return None
-        return getattr(self._running_plugins[pid], attr)
+        return getattr(plugin, attr)
 
     def run_plugin_method(self, pid: str, method: str, *args, **kwargs) -> Any:
         """
@@ -321,11 +479,12 @@ class PluginManager(metaclass=Singleton):
         :param args: 参数
         :param kwargs: 关键字参数
         """
-        if not self._running_plugins.get(pid):
+        plugin = self._running_plugins.get(pid)
+        if not plugin:
             return None
-        if not hasattr(self._running_plugins[pid], method):
+        if not hasattr(plugin, method):
             return None
-        return getattr(self._running_plugins[pid], method)(*args, **kwargs)
+        return getattr(plugin, method)(*args, **kwargs)
 
     def get_plugin_ids(self) -> List[str]:
         """

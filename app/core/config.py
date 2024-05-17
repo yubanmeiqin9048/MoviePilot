@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     # 是否开发模式
     DEV: bool = False
+    # 是否开启插件热加载
+    PLUGIN_AUTO_RELOAD: bool = False
     # 配置文件目录
     CONFIG_DIR: Optional[str] = None
     # 超级管理员
@@ -231,7 +233,7 @@ class Settings(BaseSettings):
     # 大内存模式
     BIG_MEMORY_MODE: bool = False
     # 插件市场仓库地址，多个地址使用,分隔，地址以/结尾
-    PLUGIN_MARKET: str = "https://github.com/jxxghp/MoviePilot-Plugins"
+    PLUGIN_MARKET: str = "https://github.com/jxxghp/MoviePilot-Plugins,https://github.com/thsrite/MoviePilot-Plugins,https://github.com/honue/MoviePilot-Plugins,https://github.com/InfinityPacer/MoviePilot-Plugins"
     # Github token，提高请求api限流阈值 ghp_****
     GITHUB_TOKEN: Optional[str] = None
     # 自动检查和更新站点资源包（站点索引、认证等）
@@ -242,6 +244,10 @@ class Settings(BaseSettings):
     DOH_ENABLE: bool = True
     # 搜索多个名称
     SEARCH_MULTIPLE_NAME: bool = False
+    # 订阅数据共享
+    SUBSCRIBE_STATISTIC_SHARE: bool = True
+    # 插件安装数据共享
+    PLUGIN_STATISTIC_SHARE: bool = True
 
     @validator("SUBSCRIBE_RSS_INTERVAL",
                "COOKIECLOUD_INTERVAL",

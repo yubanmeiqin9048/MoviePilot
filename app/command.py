@@ -10,9 +10,11 @@ from app.chain.site import SiteChain
 from app.chain.subscribe import SubscribeChain
 from app.chain.system import SystemChain
 from app.chain.transfer import TransferChain
+from app.core.config import settings
 from app.core.event import Event as ManagerEvent
 from app.core.event import eventmanager, EventManager
 from app.core.plugin import PluginManager
+from app.helper.message import MessageHelper
 from app.helper.thread import ThreadHelper
 from app.log import logger
 from app.scheduler import Scheduler
@@ -50,6 +52,8 @@ class Command(metaclass=Singleton):
         self.chain = CommandChian()
         # 定时服务管理
         self.scheduler = Scheduler()
+        # 消息管理器
+        self.messagehelper = MessageHelper()
         # 线程管理器
         self.threader = ThreadHelper()
         # 内置命令
@@ -165,7 +169,8 @@ class Command(metaclass=Singleton):
                 }
             )
         # 广播注册命令菜单
-        self.chain.register_commands(commands=self.get_commands())
+        if not settings.DEV:
+            self.chain.register_commands(commands=self.get_commands())
         # 消息处理线程
         self._thread = Thread(target=self.__run)
         # 启动事件处理线程
@@ -211,6 +216,9 @@ class Command(metaclass=Singleton):
                                 )
                     except Exception as e:
                         logger.error(f"事件处理出错：{str(e)} - {traceback.format_exc()}")
+                        self.messagehelper.put(title=f"{event.event_type} 事件处理出错",
+                                               message=str(e),
+                                               role="system")
 
     def __run_command(self, command: Dict[str, any],
                       data_str: str = "",
@@ -319,6 +327,9 @@ class Command(metaclass=Singleton):
                     logger.info(f"{command.get('description')} 执行完成")
             except Exception as err:
                 logger.error(f"执行命令 {cmd} 出错：{str(err)} - {traceback.format_exc()}")
+                self.messagehelper.put(title=f"执行命令 {cmd} 出错",
+                                       message=str(err),
+                                       role="system")
 
     @staticmethod
     def send_plugin_event(etype: EventType, data: dict) -> None:

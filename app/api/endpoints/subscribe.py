@@ -1,12 +1,14 @@
 import json
 from typing import List, Any
 
+import cn2an
 from fastapi import APIRouter, Request, BackgroundTasks, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 
 from app import schemas
 from app.chain.subscribe import SubscribeChain
 from app.core.config import settings
+from app.core.context import MediaInfo
 from app.core.metainfo import MetaInfo
 from app.core.security import verify_token, verify_uri_token
 from app.db import get_db
@@ -14,6 +16,7 @@ from app.db.models.subscribe import Subscribe
 from app.db.models.subscribehistory import SubscribeHistory
 from app.db.models.user import User
 from app.db.userauth import get_current_active_user
+from app.helper.subscribe import SubscribeHelper
 from app.scheduler import Scheduler
 from app.schemas.types import MediaType
 
@@ -334,6 +337,51 @@ def delete_subscribe(
     return schemas.Response(success=True)
 
 
+@router.get("/popular", summary="热门订阅（基于用户共享数据）", response_model=List[schemas.MediaInfo])
+def popular_subscribes(
+        stype: str,
+        page: int = 1,
+        count: int = 30,
+        min_sub: int = None,
+        _: schemas.TokenPayload = Depends(verify_token)) -> Any:
+    """
+    查询热门订阅
+    """
+    subscribes = SubscribeHelper().get_statistic(stype=stype, page=page, count=count)
+    if subscribes:
+        ret_medias = []
+        for sub in subscribes:
+            # 订阅人数
+            count = sub.get("count")
+            if min_sub and count < min_sub:
+                continue
+            media = MediaInfo()
+            media.type = MediaType(sub.get("type"))
+            media.tmdb_id = sub.get("tmdbid")
+            # 处理标题
+            title = sub.get("name")
+            season = sub.get("season")
+            if season and int(season) > 1 and media.tmdb_id:
+                # 小写数据转大写
+                season_str = cn2an.an2cn(season, "low")
+                title = f"{title} 第{season_str}季"
+            media.title = title
+            media.year = sub.get("year")
+            media.douban_id = sub.get("doubanid")
+            media.bangumi_id = sub.get("bangumiid")
+            media.tvdb_id = sub.get("tvdbid")
+            media.imdb_id = sub.get("imdbid")
+            media.season = sub.get("season")
+            media.overview = sub.get("description")
+            media.vote_average = sub.get("vote")
+            media.poster_path = sub.get("poster")
+            media.backdrop_path = sub.get("backdrop")
+            media.popularity = count
+            ret_medias.append(media)
+        return [media.to_dict() for media in ret_medias]
+    return []
+
+
 @router.get("/{subscribe_id}", summary="订阅详情", response_model=schemas.Subscribe)
 def read_subscribe(
         subscribe_id: int,
@@ -359,5 +407,12 @@ def delete_subscribe(
     """
     删除订阅信息
     """
-    Subscribe.delete(db, subscribe_id)
+    subscribe = Subscribe.get(db, subscribe_id)
+    if subscribe:
+        subscribe.delete(db, subscribe_id)
+    # 统计订阅
+    SubscribeHelper().sub_done_async({
+        "tmdbid": subscribe.tmdbid,
+        "doubanid": subscribe.doubanid
+    })
     return schemas.Response(success=True)

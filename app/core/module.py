@@ -1,3 +1,4 @@
+import traceback
 from typing import Generator, Optional, Tuple
 
 from app.core.config import settings
@@ -34,22 +35,29 @@ class ModuleManager(metaclass=Singleton):
         for module in modules:
             module_id = module.__name__
             self._modules[module_id] = module
-            # 生成实例
-            _module = module()
-            # 初始化模块
-            if self.check_setting(_module.init_setting()):
-                # 通过模板开关控制加载
-                _module.init_module()
-                self._running_modules[module_id] = _module
-                logger.info(f"Moudle Loaded：{module_id}")
+            try:
+                # 生成实例
+                _module = module()
+                # 初始化模块
+                if self.check_setting(_module.init_setting()):
+                    # 通过模板开关控制加载
+                    _module.init_module()
+                    self._running_modules[module_id] = _module
+                    logger.info(f"Moudle Loaded：{module_id}")
+            except Exception as err:
+                logger.error(f"Load Moudle Error：{module_id}，{str(err)} - {traceback.format_exc()}", exc_info=True)
 
     def stop(self):
         """
         停止所有模块
         """
-        for _, module in self._running_modules.items():
+        for module_id, module in self._running_modules.items():
             if hasattr(module, "stop"):
-                module.stop()
+                try:
+                    module.stop()
+                    logger.info(f"Moudle Stoped：{module_id}")
+                except Exception as err:
+                    logger.error(f"Stop Moudle Error：{module_id}，{str(err)} - {traceback.format_exc()}", exc_info=True)
 
     def reload(self):
         """
@@ -87,7 +95,7 @@ class ModuleManager(metaclass=Singleton):
             return True
         return False
 
-    def get_modules(self, method: str) -> Generator:
+    def get_running_modules(self, method: str) -> Generator:
         """
         获取实现了同一方法的模块列表
         """
@@ -97,3 +105,9 @@ class ModuleManager(metaclass=Singleton):
             if hasattr(module, method) \
                     and ObjectUtils.check_method(getattr(module, method)):
                 yield module
+
+    def get_modules(self) -> dict:
+        """
+        获取模块列表
+        """
+        return self._modules

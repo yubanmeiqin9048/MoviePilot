@@ -1,6 +1,6 @@
-from typing import Any, List
+from typing import Any, List, Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 
 from app import schemas
 from app.core.plugin import PluginManager
@@ -11,6 +11,29 @@ from app.scheduler import Scheduler
 from app.schemas.types import SystemConfigKey
 
 router = APIRouter()
+
+
+def register_plugin_api(plugin_id: str = None):
+    """
+    注册插件API（先删除后新增）
+    """
+    for api in PluginManager().get_plugin_apis(plugin_id):
+        for r in router.routes:
+            if r.path == api.get("path"):
+                router.routes.remove(r)
+                break
+        router.add_api_route(**api)
+
+
+def remove_plugin_api(plugin_id: str):
+    """
+    移除插件API
+    """
+    for api in PluginManager().get_plugin_apis(plugin_id):
+        for r in router.routes:
+            if r.path == api.get("path"):
+                router.routes.remove(r)
+                break
 
 
 @router.get("/", summary="所有插件", response_model=List[schemas.Plugin])
@@ -101,6 +124,8 @@ def install(plugin_id: str,
     PluginManager().reload_plugin(plugin_id)
     # 注册插件服务
     Scheduler().update_plugin_job(plugin_id)
+    # 注册插件API
+    register_plugin_api(plugin_id)
     return schemas.Response(success=True)
 
 
@@ -125,6 +150,23 @@ def plugin_page(plugin_id: str, _: schemas.TokenPayload = Depends(verify_token))
     return PluginManager().get_plugin_page(plugin_id)
 
 
+@router.get("/dashboards", summary="获取有仪表板的插件清单")
+def dashboard_plugins(_: schemas.TokenPayload = Depends(verify_token)) -> List[dict]:
+    """
+    获取所有插件仪表板
+    """
+    return PluginManager().get_dashboard_plugins()
+
+
+@router.get("/dashboard/{plugin_id}", summary="获取插件仪表板配置")
+def plugin_dashboard(plugin_id: str, user_agent: Annotated[str | None, Header()] = None,
+                     _: schemas.TokenPayload = Depends(verify_token)) -> schemas.PluginDashboard:
+    """
+    根据插件ID获取插件仪表板
+    """
+    return PluginManager().get_plugin_dashboard(plugin_id, user_agent=user_agent)
+
+
 @router.get("/reset/{plugin_id}", summary="重置插件配置", response_model=schemas.Response)
 def reset_plugin(plugin_id: str, _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
@@ -139,6 +181,8 @@ def reset_plugin(plugin_id: str, _: schemas.TokenPayload = Depends(verify_token)
     })
     # 注册插件服务
     Scheduler().update_plugin_job(plugin_id)
+    # 注册插件API
+    register_plugin_api(plugin_id)
     return schemas.Response(success=True)
 
 
@@ -162,6 +206,8 @@ def set_plugin_config(plugin_id: str, conf: dict,
     PluginManager().init_plugin(plugin_id, conf)
     # 注册插件服务
     Scheduler().update_plugin_job(plugin_id)
+    # 注册插件API
+    register_plugin_api(plugin_id)
     return schemas.Response(success=True)
 
 
@@ -183,9 +229,10 @@ def uninstall_plugin(plugin_id: str,
     PluginManager().remove_plugin(plugin_id)
     # 移除插件服务
     Scheduler().remove_plugin_job(plugin_id)
+    # 移除插件API
+    remove_plugin_api(plugin_id)
     return schemas.Response(success=True)
 
 
-# 注册插件API
-for api in PluginManager().get_plugin_apis():
-    router.add_api_route(**api)
+# 注册全部插件API
+register_plugin_api()
