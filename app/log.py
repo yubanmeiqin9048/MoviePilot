@@ -98,7 +98,6 @@ class LoggerManager:
 
         # 终端日志
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.DEBUG)
         console_formatter = CustomFormatter(f"%(leveltext)s%(message)s")
         console_handler.setFormatter(console_formatter)
         _logger.addHandler(console_handler)
@@ -109,7 +108,6 @@ class LoggerManager:
                                            maxBytes=5 * 1024 * 1024,
                                            backupCount=3,
                                            encoding='utf-8')
-        file_handler.setLevel(logging.INFO)
         file_formater = CustomFormatter(f"【%(levelname)s】%(asctime)s - %(message)s")
         file_handler.setFormatter(file_formater)
         _logger.addHandler(file_handler)

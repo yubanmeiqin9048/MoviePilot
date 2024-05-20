@@ -187,9 +187,9 @@ class Command(metaclass=Singleton):
             if event:
                 logger.info(f"处理事件：{event.event_type} - {handlers}")
                 for handler in handlers:
+                    names = handler.__qualname__.split(".")
+                    [class_name, method_name] = names
                     try:
-                        names = handler.__qualname__.split(".")
-                        [class_name, method_name] = names
                         if class_name in self.pluginmanager.get_plugin_ids():
                             # 插件事件
                             self.threader.submit(
@@ -201,10 +201,15 @@ class Command(metaclass=Singleton):
                             # 检查全局变量中是否存在
                             if class_name not in globals():
                                 # 导入模块，除了插件和Command本身，只有chain能响应事件
-                                module = importlib.import_module(
-                                    f"app.chain.{class_name[:-5].lower()}"
-                                )
-                                class_obj = getattr(module, class_name)()
+                                try:
+                                    module = importlib.import_module(
+                                        f"app.chain.{class_name[:-5].lower()}"
+                                    )
+                                    class_obj = getattr(module, class_name)()
+                                except Exception as e:
+                                    logger.error(f"事件处理出错：{str(e)} - {traceback.format_exc()}")
+                                    continue
+
                             else:
                                 # 通过类名创建类实例
                                 class_obj = globals()[class_name]()
@@ -217,7 +222,7 @@ class Command(metaclass=Singleton):
                     except Exception as e:
                         logger.error(f"事件处理出错：{str(e)} - {traceback.format_exc()}")
                         self.messagehelper.put(title=f"{event.event_type} 事件处理出错",
-                                               message=str(e),
+                                               message=f"{class_name}.{method_name}：{str(e)}",
                                                role="system")
 
     def __run_command(self, command: Dict[str, any],
@@ -274,9 +279,11 @@ class Command(metaclass=Singleton):
         """
         停止事件处理线程
         """
+        logger.info("正在停止事件处理...")
         self._event.set()
         try:
             self._thread.join()
+            logger.info("事件处理停止完成")
         except Exception as e:
             logger.error(f"停止事件处理线程出错：{str(e)} - {traceback.format_exc()}")
 

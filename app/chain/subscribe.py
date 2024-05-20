@@ -2,6 +2,7 @@ import json
 import random
 import time
 from datetime import datetime
+from json import JSONDecodeError
 from typing import Dict, List, Optional, Union, Tuple
 
 from app.chain import ChainBase
@@ -141,7 +142,7 @@ class SubscribeChain(ChainBase):
             'effect': self.__get_default_subscribe_config(mediainfo.type, "effect"),
             'include': self.__get_default_subscribe_config(mediainfo.type, "include"),
             'exclude': self.__get_default_subscribe_config(mediainfo.type, "exclude"),
-            'best_version': self.__get_default_subscribe_config(mediainfo.type, "best_version") if kwargs.get("best_version") is None else kwargs.get("best_version"),
+            'best_version': self.__get_default_subscribe_config(mediainfo.type, "best_version") if not kwargs.get("best_version") else kwargs.get("best_version"),
             'search_imdbid': self.__get_default_subscribe_config(mediainfo.type, "search_imdbid"),
             'sites': self.__get_default_subscribe_config(mediainfo.type, "sites") or None,
             'save_path': self.__get_default_subscribe_config(mediainfo.type, "save_path"),
@@ -459,7 +460,10 @@ class SubscribeChain(ChainBase):
         获取订阅中涉及的站点清单
         """
         if subscribe.sites:
-            return json.loads(subscribe.sites)
+            try:
+                return json.loads(subscribe.sites)
+            except JSONDecodeError:
+                return []
         # 默认站点
         return self.systemconfig.get(SystemConfigKey.RssSites) or []
 
@@ -780,7 +784,10 @@ class SubscribeChain(ChainBase):
             return
         note = []
         if subscribe.note:
-            note = json.loads(subscribe.note)
+            try:
+                note = json.loads(subscribe.note)
+            except JSONDecodeError:
+                note = []
         for context in downloads:
             meta = context.meta_info
             mediainfo = context.media_info
@@ -811,7 +818,10 @@ class SubscribeChain(ChainBase):
             return False
         if not episodes:
             return False
-        note = json.loads(subscribe.note)
+        try:
+            note = json.loads(subscribe.note)
+        except JSONDecodeError:
+            return False
         if set(episodes).issubset(set(note)):
             return True
         return False
@@ -1023,7 +1033,10 @@ class SubscribeChain(ChainBase):
         for subscribe in self.subscribeoper.list():
             if not subscribe.sites:
                 continue
-            sites = json.loads(subscribe.sites) or []
+            try:
+                sites = json.loads(subscribe.sites)
+            except JSONDecodeError:
+                sites = []
             if site_id not in sites:
                 continue
             sites.remove(site_id)
