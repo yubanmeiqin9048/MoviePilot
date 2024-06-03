@@ -151,6 +151,11 @@ class FilterModule(_ModuleBase):
             "include": [r'NF'],
             "exclude": []
         },
+        # 流媒体meWATCH
+        "MEWATCH": {
+            "include": [r'meWATCH'],
+            "exclude": []
+        }
         # 流媒体FIRDAY
         "FIRDAY": {
             "include": [r'firday'],
