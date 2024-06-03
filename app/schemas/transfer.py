@@ -12,6 +12,7 @@ class TransferTorrent(BaseModel):
     path: Optional[Path] = None
     hash: Optional[str] = None
     tags: Optional[str] = None
+    size: Optional[int] = 0
     userid: Optional[str] = None
 
 
@@ -59,6 +60,8 @@ class TransferInfo(BaseModel):
     fail_list: Optional[list] = []
     # 错误信息
     message: Optional[str] = None
+    # 是否需要刮削
+    need_scrape: Optional[bool] = False
 
     def to_dict(self):
         """

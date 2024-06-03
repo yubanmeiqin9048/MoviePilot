@@ -53,12 +53,12 @@ class SearchChain(ChainBase):
                 }
             }
         results = self.process(mediainfo=mediainfo, area=area, no_exists=no_exists)
-        # 保存眲结果
+        # 保存结果
         bytes_results = pickle.dumps(results)
         self.systemconfig.set(SystemConfigKey.SearchResults, bytes_results)
         return results
 
-    def search_by_title(self, title: str, page: int = 0, site: int = None) -> List[TorrentInfo]:
+    def search_by_title(self, title: str, page: int = 0, site: int = None) -> List[Context]:
         """
         根据标题搜索资源，不识别不过滤，直接返回站点内容
         :param title: 标题，为空时返回所有站点首页内容
@@ -70,7 +70,17 @@ class SearchChain(ChainBase):
         else:
             logger.info(f'开始浏览资源，站点：{site} ...')
         # 搜索
-        return self.__search_all_sites(keywords=[title], sites=[site] if site else None, page=page) or []
+        torrents = self.__search_all_sites(keywords=[title], sites=[site] if site else None, page=page) or []
+        if not torrents:
+            logger.warn(f'{title} 未搜索到资源')
+            return []
+        # 组装上下文
+        contexts = [Context(meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
+                            torrent_info=torrent) for torrent in torrents]
+        # 保存结果
+        bytes_results = pickle.dumps(contexts)
+        self.systemconfig.set(SystemConfigKey.SearchResults, bytes_results)
+        return contexts
 
     def last_search_results(self) -> List[Context]:
         """
@@ -133,7 +143,7 @@ class SearchChain(ChainBase):
         if no_exists and no_exists.get(mediakey):
             # 过滤剧集
             season_episodes = {sea: info.episodes
-                               for sea, info in no_exists[mediainfo.tmdb_id].items()}
+                               for sea, info in no_exists[mediakey].items()}
         elif mediainfo.season:
             # 豆瓣只搜索当前季
             season_episodes = {mediainfo.season: []}
@@ -192,19 +202,6 @@ class SearchChain(ChainBase):
                 torrent_meta = MetaInfo(title=torrent.title, subtitle=torrent.description)
                 if torrent.title != torrent_meta.org_string:
                     logger.info(f"种子名称应用识别词后发生改变：{torrent.title} => {torrent_meta.org_string}")
-                # 比对词条指定的tmdbid
-                if torrent_meta.tmdbid or torrent_meta.doubanid:
-                    if torrent_meta.tmdbid and torrent_meta.tmdbid == mediainfo.tmdb_id:
-                        logger.info(
-                            f'{mediainfo.title} 通过词表指定TMDBID匹配到资源：{torrent.site_name} - {torrent.title}')
-                        _match_torrents.append(torrent)
-                        continue
-                    if torrent_meta.doubanid and torrent_meta.doubanid == mediainfo.douban_id:
-                        logger.info(
-                            f'{mediainfo.title} 通过词表指定豆瓣ID匹配到资源：{torrent.site_name} - {torrent.title}')
-                        _match_torrents.append(torrent)
-                        continue
-
                 # 比对种子
                 if self.torrenthelper.match_torrent(mediainfo=mediainfo,
                                                     torrent_meta=torrent_meta,
@@ -240,24 +237,8 @@ class SearchChain(ChainBase):
             # 取搜索优先级规则
             priority_rule = self.systemconfig.get(SystemConfigKey.SearchFilterRules)
         if priority_rule:
-            # 使用多线程进行优先级过滤，1个站点一个线程
             logger.info(f'开始优先级规则/剧集过滤，当前规则：{priority_rule} ...')
-            # 站点列表
-            filter_sites = set([t.site_name for t in _match_torrents])
-            # 多线程
-            executor = ThreadPoolExecutor(max_workers=len(filter_sites))
-            all_task = []
-            for site in filter_sites:
-                task = executor.submit(__do_filter,
-                                       torrent_list=[t for t in _match_torrents if t.site_name == site])
-                all_task.append(task)
-            # 汇总结果
-            results = []
-            for future in as_completed(all_task):
-                result = future.result()
-                if result:
-                    results.extend(result)
-            _match_torrents = results
+            _match_torrents = __do_filter(_match_torrents)
             if not _match_torrents:
                 logger.warn(f'{keyword or mediainfo.title} 没有符合优先级规则的资源')
                 return []

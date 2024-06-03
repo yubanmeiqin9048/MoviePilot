@@ -192,11 +192,12 @@ class QbittorrentModule(_ModuleBase):
                 if content_path:
                     torrent_path = Path(content_path)
                 else:
-                    torrent_path = settings.SAVE_PATH / torrent.get('name')
+                    torrent_path = torrent.get('save_path') / torrent.get('name')
                 ret_torrents.append(TransferTorrent(
                     title=torrent.get('name'),
                     path=torrent_path,
                     hash=torrent.get('hash'),
+                    size=torrent.get('total_size'),
                     tags=torrent.get('tags')
                 ))
         elif status == TorrentStatus.TRANSFER:
@@ -211,7 +212,7 @@ class QbittorrentModule(_ModuleBase):
                 if content_path:
                     torrent_path = Path(content_path)
                 else:
-                    torrent_path = settings.SAVE_PATH / torrent.get('name')
+                    torrent_path = torrent.get('save_path') / torrent.get('name')
                 ret_torrents.append(TransferTorrent(
                     title=torrent.get('name'),
                     path=torrent_path,
@@ -242,7 +243,7 @@ class QbittorrentModule(_ModuleBase):
             return None
         return ret_torrents
 
-    def transfer_completed(self, hashs: Union[str, list], path: Path = None,
+    def transfer_completed(self, hashs: str, path: Path = None,
                            downloader: str = settings.DEFAULT_DOWNLOADER) -> None:
         """
         转移完成后的处理

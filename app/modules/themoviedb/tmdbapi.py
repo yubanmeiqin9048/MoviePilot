@@ -530,7 +530,7 @@ class TmdbApi:
                  tmdbid: int) -> dict:
         """
         给定TMDB号，查询一条媒体信息
-        :param mtype: 类型：电影、电视剧、动漫，为空时都查（此时用不上年份）
+        :param mtype: 类型：电影、电视剧，为空时都查（此时用不上年份）
         :param tmdbid: TMDB的ID，有tmdbid时优先使用tmdbid，否则使用年份和标题
         """
 
@@ -759,10 +759,10 @@ class TmdbApi:
         if not self.movie:
             return {}
         try:
-            logger.info("正在查询TMDB电影：%s ..." % tmdbid)
+            logger.debug("正在查询TMDB电影：%s ..." % tmdbid)
             tmdbinfo = self.movie.details(tmdbid, append_to_response)
             if tmdbinfo:
-                logger.info(f"{tmdbid} 查询结果：{tmdbinfo.get('title')}")
+                logger.debug(f"{tmdbid} 查询结果：{tmdbinfo.get('title')}")
             return tmdbinfo or {}
         except Exception as e:
             print(str(e))
@@ -942,10 +942,10 @@ class TmdbApi:
         if not self.tv:
             return {}
         try:
-            logger.info("正在查询TMDB电视剧：%s ..." % tmdbid)
+            logger.debug("正在查询TMDB电视剧：%s ..." % tmdbid)
             tmdbinfo = self.tv.details(tv_id=tmdbid, append_to_response=append_to_response)
             if tmdbinfo:
-                logger.info(f"{tmdbid} 查询结果：{tmdbinfo.get('name')}")
+                logger.debug(f"{tmdbid} 查询结果：{tmdbinfo.get('name')}")
             return tmdbinfo or {}
         except Exception as e:
             print(str(e))
@@ -1018,7 +1018,7 @@ class TmdbApi:
         if not self.season:
             return {}
         try:
-            logger.info("正在查询TMDB电视剧：%s，季：%s ..." % (tmdbid, season))
+            logger.debug("正在查询TMDB电视剧：%s，季：%s ..." % (tmdbid, season))
             tmdbinfo = self.season.details(tv_id=tmdbid, season_num=season)
             return tmdbinfo or {}
         except Exception as e:
@@ -1035,7 +1035,7 @@ class TmdbApi:
         if not self.episode:
             return {}
         try:
-            logger.info("正在查询TMDB集详情：%s，季：%s，集：%s ..." % (tmdbid, season, episode))
+            logger.debug("正在查询TMDB集详情：%s，季：%s，集：%s ..." % (tmdbid, season, episode))
             tmdbinfo = self.episode.details(tv_id=tmdbid, season_num=season, episode_num=episode)
             return tmdbinfo or {}
         except Exception as e:
@@ -1051,8 +1051,9 @@ class TmdbApi:
         if not self.discover:
             return []
         try:
-            logger.info(f"正在发现电影：{kwargs}...")
-            tmdbinfo = self.discover.discover_movies(kwargs)
+            logger.debug(f"正在发现电影：{kwargs}...")
+            params_tuple = tuple(kwargs.items())
+            tmdbinfo = self.discover.discover_movies(params_tuple)
             if tmdbinfo:
                 for info in tmdbinfo:
                     info['media_type'] = MediaType.MOVIE
@@ -1070,7 +1071,7 @@ class TmdbApi:
         if not self.discover:
             return []
         try:
-            logger.info(f"正在发现电视剧：{kwargs}...")
+            logger.debug(f"正在发现电视剧：{kwargs}...")
             tmdbinfo = self.discover.discover_tv_shows(kwargs)
             if tmdbinfo:
                 for info in tmdbinfo:
@@ -1087,7 +1088,7 @@ class TmdbApi:
         if not self.movie:
             return {}
         try:
-            logger.info(f"正在获取电影图片：{tmdbid}...")
+            logger.debug(f"正在获取电影图片：{tmdbid}...")
             return self.movie.images(movie_id=tmdbid) or {}
         except Exception as e:
             print(str(e))
@@ -1100,7 +1101,7 @@ class TmdbApi:
         if not self.tv:
             return {}
         try:
-            logger.info(f"正在获取电视剧图片：{tmdbid}...")
+            logger.debug(f"正在获取电视剧图片：{tmdbid}...")
             return self.tv.images(tv_id=tmdbid) or {}
         except Exception as e:
             print(str(e))
@@ -1113,7 +1114,7 @@ class TmdbApi:
         if not self.movie:
             return []
         try:
-            logger.info(f"正在获取相似电影：{tmdbid}...")
+            logger.debug(f"正在获取相似电影：{tmdbid}...")
             return self.movie.similar(movie_id=tmdbid) or []
         except Exception as e:
             print(str(e))
@@ -1126,7 +1127,7 @@ class TmdbApi:
         if not self.tv:
             return []
         try:
-            logger.info(f"正在获取相似电视剧：{tmdbid}...")
+            logger.debug(f"正在获取相似电视剧：{tmdbid}...")
             return self.tv.similar(tv_id=tmdbid) or []
         except Exception as e:
             print(str(e))
@@ -1139,7 +1140,7 @@ class TmdbApi:
         if not self.movie:
             return []
         try:
-            logger.info(f"正在获取推荐电影：{tmdbid}...")
+            logger.debug(f"正在获取推荐电影：{tmdbid}...")
             return self.movie.recommendations(movie_id=tmdbid) or []
         except Exception as e:
             print(str(e))
@@ -1152,7 +1153,7 @@ class TmdbApi:
         if not self.tv:
             return []
         try:
-            logger.info(f"正在获取推荐电视剧：{tmdbid}...")
+            logger.debug(f"正在获取推荐电视剧：{tmdbid}...")
             return self.tv.recommendations(tv_id=tmdbid) or []
         except Exception as e:
             print(str(e))
@@ -1165,7 +1166,7 @@ class TmdbApi:
         if not self.movie:
             return []
         try:
-            logger.info(f"正在获取电影演职人员：{tmdbid}...")
+            logger.debug(f"正在获取电影演职人员：{tmdbid}...")
             info = self.movie.credits(movie_id=tmdbid) or {}
             cast = info.get('cast') or []
             if cast:
@@ -1182,7 +1183,7 @@ class TmdbApi:
         if not self.tv:
             return []
         try:
-            logger.info(f"正在获取电视剧演职人员：{tmdbid}...")
+            logger.debug(f"正在获取电视剧演职人员：{tmdbid}...")
             info = self.tv.credits(tv_id=tmdbid) or {}
             cast = info.get('cast') or []
             if cast:
@@ -1219,7 +1220,7 @@ class TmdbApi:
         if not self.person:
             return {}
         try:
-            logger.info(f"正在获取人物详情：{person_id}...")
+            logger.debug(f"正在获取人物详情：{person_id}...")
             return self.person.details(person_id=person_id) or {}
         except Exception as e:
             print(str(e))
@@ -1232,7 +1233,7 @@ class TmdbApi:
         if not self.person:
             return []
         try:
-            logger.info(f"正在获取人物参演作品：{person_id}...")
+            logger.debug(f"正在获取人物参演作品：{person_id}...")
             movies = self.person.movie_credits(person_id=person_id) or {}
             tvs = self.person.tv_credits(person_id=person_id) or {}
             cast = (movies.get('cast') or []) + (tvs.get('cast') or [])
@@ -1262,7 +1263,7 @@ class TmdbApi:
                 return {}
             episode_years = {}
             for episode_group in episode_groups:
-                logger.info(f"正在获取剧集组年份：{episode_group.get('id')}...")
+                logger.debug(f"正在获取剧集组年份：{episode_group.get('id')}...")
                 if episode_group.get('type') != 6:
                     # 只处理剧集部分
                     continue

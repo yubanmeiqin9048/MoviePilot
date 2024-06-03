@@ -94,11 +94,12 @@ class ChainBase(metaclass=ABCMeta):
         result = None
         modules = self.modulemanager.get_running_modules(method)
         for module in modules:
+            module_id = module.__class__.__name__
             try:
                 module_name = module.get_name()
             except Exception as err:
                 logger.error(f"获取模块名称出错：{str(err)}")
-                module_name = module.__class__.__name__
+                module_name = module_id
             try:
                 func = getattr(module, method)
                 if is_result_empty(result):
@@ -117,10 +118,21 @@ class ChainBase(metaclass=ABCMeta):
                     break
             except Exception as err:
                 logger.error(
-                    f"运行模块 {module.__class__.__name__}.{method} 出错：{str(err)}\n{traceback.format_exc()}")
+                    f"运行模块 {module_id}.{method} 出错：{str(err)}\n{traceback.format_exc()}")
                 self.messagehelper.put(title=f"{module_name}发生了错误",
                                        message=str(err),
                                        role="system")
+                self.eventmanager.send_event(
+                    EventType.SystemError,
+                    {
+                        "type": "module",
+                        "module_id": module_id,
+                        "module_name": module_name,
+                        "module_method": method,
+                        "error": str(err),
+                        "traceback": traceback.format_exc()
+                    }
+                )
         return result
 
     def recognize_media(self, meta: MetaBase = None,
@@ -358,7 +370,8 @@ class ChainBase(metaclass=ABCMeta):
 
     def transfer(self, path: Path, meta: MetaBase, mediainfo: MediaInfo,
                  transfer_type: str, target: Path = None,
-                 episodes_info: List[TmdbEpisode] = None) -> Optional[TransferInfo]:
+                 episodes_info: List[TmdbEpisode] = None,
+                 scrape: bool = None) -> Optional[TransferInfo]:
         """
         文件转移
         :param path:  文件路径
@@ -367,12 +380,14 @@ class ChainBase(metaclass=ABCMeta):
         :param transfer_type:  转移模式
         :param target:  转移目标路径
         :param episodes_info: 当前季的全部集信息
+        :param scrape: 是否刮削元数据
         :return: {path, target_path, message}
         """
         return self.run_module("transfer", path=path, meta=meta, mediainfo=mediainfo,
-                               transfer_type=transfer_type, target=target, episodes_info=episodes_info)
+                               transfer_type=transfer_type, target=target, episodes_info=episodes_info,
+                               scrape=scrape)
 
-    def transfer_completed(self, hashs: Union[str, list], path: Path = None,
+    def transfer_completed(self, hashs: str, path: Path = None,
                            downloader: str = settings.DEFAULT_DOWNLOADER) -> None:
         """
         转移完成后的处理
@@ -505,6 +520,13 @@ class ChainBase(metaclass=ABCMeta):
         """
         self.run_module("scrape_metadata", path=path, mediainfo=mediainfo, metainfo=metainfo,
                         transfer_type=transfer_type, force_nfo=force_nfo, force_img=force_img)
+
+    def media_category(self) -> Optional[Dict[str, list]]:
+        """
+        获取媒体分类
+        :return: 获取二级分类配置字典项，需包括电影、电视剧
+        """
+        return self.run_module("media_category")
 
     def register_commands(self, commands: Dict[str, dict]) -> None:
         """

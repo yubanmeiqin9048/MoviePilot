@@ -2,7 +2,7 @@ import secrets
 import sys
 import threading
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseSettings, validator
 
@@ -55,8 +55,6 @@ class Settings(BaseSettings):
     RECOGNIZE_SOURCE: str = "themoviedb"
     # 刮削来源 themoviedb/douban
     SCRAP_SOURCE: str = "themoviedb"
-    # 刮削入库的媒体文件
-    SCRAP_METADATA: bool = True
     # 新增已入库媒体是否跟随TMDB信息变化
     SCRAP_FOLLOW_TMDB: bool = True
     # TMDB图片地址
@@ -159,16 +157,6 @@ class Settings(BaseSettings):
     TR_PASSWORD: Optional[str] = None
     # 种子标签
     TORRENT_TAG: str = "MOVIEPILOT"
-    # 下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_PATH: Optional[str] = None
-    # 电影下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_MOVIE_PATH: Optional[str] = None
-    # 电视剧下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_TV_PATH: Optional[str] = None
-    # 动漫下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_ANIME_PATH: Optional[str] = None
-    # 下载目录二级分类
-    DOWNLOAD_CATEGORY: bool = False
     # 下载站点字幕
     DOWNLOAD_SUBTITLE: bool = True
     # 媒体服务器 emby/jellyfin/plex，多个媒体服务器,分割
@@ -197,6 +185,8 @@ class Settings(BaseSettings):
     PLEX_TOKEN: Optional[str] = None
     # 转移方式 link/copy/move/softlink
     TRANSFER_TYPE: str = "copy"
+    # 是否同盘优先
+    TRANSFER_SAME_DISK: bool = True
     # CookieCloud是否启动本地服务
     COOKIECLOUD_ENABLE_LOCAL: Optional[bool] = False
     # CookieCloud服务器地址
@@ -211,16 +201,6 @@ class Settings(BaseSettings):
     OCR_HOST: str = "https://movie-pilot.org"
     # CookieCloud对应的浏览器UA
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.57"
-    # 媒体库目录，多个目录使用,分隔
-    LIBRARY_PATH: Optional[str] = None
-    # 电影媒体库目录名
-    LIBRARY_MOVIE_NAME: str = "电影"
-    # 电视剧媒体库目录名
-    LIBRARY_TV_NAME: str = "电视剧"
-    # 动漫媒体库目录名，不设置时使用电视剧目录
-    LIBRARY_ANIME_NAME: Optional[str] = None
-    # 二级分类
-    LIBRARY_CATEGORY: bool = True
     # 电视剧动漫的分类genre_ids
     ANIME_GENREIDS = [16]
     # 电影重命名格式
@@ -240,6 +220,8 @@ class Settings(BaseSettings):
     PLUGIN_MARKET: str = "https://github.com/jxxghp/MoviePilot-Plugins,https://github.com/thsrite/MoviePilot-Plugins,https://github.com/honue/MoviePilot-Plugins,https://github.com/InfinityPacer/MoviePilot-Plugins"
     # Github token，提高请求api限流阈值 ghp_****
     GITHUB_TOKEN: Optional[str] = None
+    # Github代理服务器，格式：https://mirror.ghproxy.com/
+    GITHUB_PROXY: Optional[str] = ''
     # 自动检查和更新站点资源包（站点索引、认证等）
     AUTO_UPDATE_RESOURCE: bool = True
     # 元数据识别缓存过期时间（小时）
@@ -252,6 +234,31 @@ class Settings(BaseSettings):
     SUBSCRIBE_STATISTIC_SHARE: bool = True
     # 插件安装数据共享
     PLUGIN_STATISTIC_SHARE: bool = True
+    # 服务器地址，对应 https://github.com/jxxghp/MoviePilot-Server 项目
+    MP_SERVER_HOST: str = "https://movie-pilot.org"
+
+    # 【已弃用】刮削入库的媒体文件
+    SCRAP_METADATA: bool = True
+    # 【已弃用】下载保存目录，容器内映射路径需要一致
+    DOWNLOAD_PATH: Optional[str] = None
+    # 【已弃用】电影下载保存目录，容器内映射路径需要一致
+    DOWNLOAD_MOVIE_PATH: Optional[str] = None
+    # 【已弃用】电视剧下载保存目录，容器内映射路径需要一致
+    DOWNLOAD_TV_PATH: Optional[str] = None
+    # 【已弃用】动漫下载保存目录，容器内映射路径需要一致
+    DOWNLOAD_ANIME_PATH: Optional[str] = None
+    # 【已弃用】下载目录二级分类
+    DOWNLOAD_CATEGORY: bool = False
+    # 【已弃用】媒体库目录，多个目录使用,分隔
+    LIBRARY_PATH: Optional[str] = None
+    # 【已弃用】电影媒体库目录名
+    LIBRARY_MOVIE_NAME: str = "电影"
+    # 【已弃用】电视剧媒体库目录名
+    LIBRARY_TV_NAME: str = "电视剧"
+    # 【已弃用】动漫媒体库目录名，不设置时使用电视剧目录
+    LIBRARY_ANIME_NAME: Optional[str] = None
+    # 【已弃用】二级分类
+    LIBRARY_CATEGORY: bool = True
 
     @validator("SUBSCRIBE_RSS_INTERVAL",
                "COOKIECLOUD_INTERVAL",
@@ -337,48 +344,6 @@ class Settings(BaseSettings):
             }
 
     @property
-    def LIBRARY_PATHS(self) -> List[Path]:
-        if self.LIBRARY_PATH:
-            return [Path(path) for path in self.LIBRARY_PATH.split(",")]
-        return [self.CONFIG_PATH / "library"]
-
-    @property
-    def SAVE_PATH(self) -> Path:
-        """
-        获取下载保存目录
-        """
-        if self.DOWNLOAD_PATH:
-            return Path(self.DOWNLOAD_PATH)
-        return self.CONFIG_PATH / "downloads"
-
-    @property
-    def SAVE_MOVIE_PATH(self) -> Path:
-        """
-        获取电影下载保存目录
-        """
-        if self.DOWNLOAD_MOVIE_PATH:
-            return Path(self.DOWNLOAD_MOVIE_PATH)
-        return self.SAVE_PATH
-
-    @property
-    def SAVE_TV_PATH(self) -> Path:
-        """
-        获取电视剧下载保存目录
-        """
-        if self.DOWNLOAD_TV_PATH:
-            return Path(self.DOWNLOAD_TV_PATH)
-        return self.SAVE_PATH
-
-    @property
-    def SAVE_ANIME_PATH(self) -> Path:
-        """
-        获取动漫下载保存目录
-        """
-        if self.DOWNLOAD_ANIME_PATH:
-            return Path(self.DOWNLOAD_ANIME_PATH)
-        return self.SAVE_TV_PATH
-
-    @property
     def GITHUB_HEADERS(self):
         """
         Github请求头
@@ -396,7 +361,7 @@ class Settings(BaseSettings):
         """
         if not self.DOWNLOADER:
             return None
-        return self.DOWNLOADER.split(",")[0]
+        return next((d for d in settings.DOWNLOADER.split(",") if d), None)
 
     @property
     def DOWNLOADERS(self):
@@ -405,7 +370,7 @@ class Settings(BaseSettings):
         """
         if not self.DOWNLOADER:
             return []
-        return self.DOWNLOADER.split(",")
+        return [d for d in settings.DOWNLOADER.split(",") if d]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

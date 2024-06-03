@@ -16,7 +16,9 @@ from app.db.models.downloadhistory import DownloadHistory
 from app.db.models.transferhistory import TransferHistory
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.transferhistory_oper import TransferHistoryOper
+from app.helper.directory import DirectoryHelper
 from app.helper.format import FormatParser
+from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
 from app.log import logger
 from app.schemas import TransferInfo, TransferTorrent, Notification, EpisodeFormat
@@ -41,6 +43,8 @@ class TransferChain(ChainBase):
         self.mediachain = MediaChain()
         self.tmdbchain = TmdbChain()
         self.systemconfig = SystemConfigOper()
+        self.directoryhelper = DirectoryHelper()
+        self.messagehelper = MessageHelper()
 
     def process(self) -> bool:
         """
@@ -63,7 +67,10 @@ class TransferChain(ChainBase):
                 downloadhis: DownloadHistory = self.downloadhis.get_by_hash(torrent.hash)
                 if downloadhis:
                     # 类型
-                    mtype = MediaType(downloadhis.type)
+                    try:
+                        mtype = MediaType(downloadhis.type)
+                    except ValueError:
+                        mtype = MediaType.TV
                     # 按TMDBID识别
                     mediainfo = self.recognize_media(mtype=mtype,
                                                      tmdbid=downloadhis.tmdbid,
@@ -86,7 +93,8 @@ class TransferChain(ChainBase):
                     mediainfo: MediaInfo = None, download_hash: str = None,
                     target: Path = None, transfer_type: str = None,
                     season: int = None, epformat: EpisodeFormat = None,
-                    min_filesize: int = 0, force: bool = False) -> Tuple[bool, str]:
+                    min_filesize: int = 0, scrape: bool = None,
+                    force: bool = False) -> Tuple[bool, str]:
         """
         执行一个复杂目录的转移操作
         :param path: 待转移目录或文件
@@ -98,6 +106,7 @@ class TransferChain(ChainBase):
         :param season: 季
         :param epformat: 剧集格式
         :param min_filesize: 最小文件大小(MB)
+        :param scrape: 是否刮削元数据
         :param force: 是否强制转移
         返回：成功标识，错误信息
         """
@@ -300,7 +309,8 @@ class TransferChain(ChainBase):
                                                            path=file_path,
                                                            transfer_type=transfer_type,
                                                            target=target,
-                                                           episodes_info=episodes_info)
+                                                           episodes_info=episodes_info,
+                                                           scrape=scrape)
                 if not transferinfo:
                     logger.error("文件转移模块运行失败")
                     return False, "文件转移模块运行失败"
@@ -347,20 +357,32 @@ class TransferChain(ChainBase):
                     transfers[mkey].file_list_new.extend(transferinfo.file_list_new)
                     transfers[mkey].fail_list.extend(transferinfo.fail_list)
 
+                # 硬链接检查
+                temp_transfer_type = transfer_type
+                if transfer_type == "link":
+                    if not SystemUtils.is_same_disk(file_path, transferinfo.target_path):
+                        logger.warn(
+                            f"{file_path} 与 {transferinfo.target_path} 不在同一磁盘/存储空间/映射目录，未能硬链接，请检查存储空间占用和整理耗时，确认是否为复制")
+                        self.messagehelper.put(
+                            f"{file_path} 与 {transferinfo.target_path} 不在同一磁盘/存储空间/映射目录，疑似硬链接失败，请检查是否为复制",
+                            title="硬链接失败",
+                            role="system")
+                        temp_transfer_type = "copy"
+
                 # 新增转移成功历史记录
                 self.transferhis.add_success(
                     src_path=file_path,
-                    mode=transfer_type,
+                    mode=temp_transfer_type,
                     download_hash=download_hash,
                     meta=file_meta,
                     mediainfo=file_mediainfo,
                     transferinfo=transferinfo
                 )
                 # 刮削单个文件
-                if settings.SCRAP_METADATA:
+                if transferinfo.need_scrape:
                     self.scrape_metadata(path=transferinfo.target_path,
                                          mediainfo=file_mediainfo,
-                                         transfer_type=transfer_type,
+                                         transfer_type=temp_transfer_type,
                                          metainfo=file_meta)
                 # 更新进度
                 processed_num += 1
@@ -487,24 +509,6 @@ class TransferChain(ChainBase):
                                            text=errmsg, userid=userid))
             return
 
-    @staticmethod
-    def get_root_path(path: str, type_name: str, category: str) -> Optional[Path]:
-        """
-        计算媒体库目录的根路径
-        """
-        if not path or path == "None":
-            return None
-        index = -2
-        if type_name != '电影':
-            index = -3
-        if category:
-            index -= 1
-        if '/' in path:
-            retpath = '/'.join(path.split('/')[:index])
-        else:
-            retpath = '\\'.join(path.split('\\')[:index])
-        return Path(retpath)
-
     def re_transfer(self, logid: int, mtype: MediaType = None,
                     mediaid: str = None) -> Tuple[bool, str]:
         """
@@ -522,7 +526,6 @@ class TransferChain(ChainBase):
         src_path = Path(history.src)
         if not src_path.exists():
             return False, f"源目录不存在：{src_path}"
-        dest_path = self.get_root_path(path=history.dest, type_name=history.type, category=history.category)
         # 查询媒体信息
         if mtype and mediaid:
             mediainfo = self.recognize_media(mtype=mtype, tmdbid=int(mediaid) if str(mediaid).isdigit() else None,
@@ -545,7 +548,6 @@ class TransferChain(ChainBase):
         state, errmsg = self.do_transfer(path=src_path,
                                          mediainfo=mediainfo,
                                          download_hash=history.download_hash,
-                                         target=dest_path,
                                          force=True)
         if not state:
             return False, errmsg
@@ -561,6 +563,7 @@ class TransferChain(ChainBase):
                         transfer_type: str = None,
                         epformat: EpisodeFormat = None,
                         min_filesize: int = 0,
+                        scrape: bool = None,
                         force: bool = False) -> Tuple[bool, Union[str, list]]:
         """
         手动转移，支持复杂条件，带进度显示
@@ -573,6 +576,7 @@ class TransferChain(ChainBase):
         :param transfer_type: 转移类型
         :param epformat: 剧集格式
         :param min_filesize: 最小文件大小(MB)
+        :param scrape: 是否刮削元数据
         :param force: 是否强制转移
         """
         logger.info(f"手动转移：{in_path} ...")
@@ -597,6 +601,7 @@ class TransferChain(ChainBase):
                 season=season,
                 epformat=epformat,
                 min_filesize=min_filesize,
+                scrape=scrape,
                 force=force
             )
             if not state:
@@ -639,8 +644,7 @@ class TransferChain(ChainBase):
             mtype=NotificationType.Organize,
             title=msg_title, text=msg_str, image=mediainfo.get_message_image()))
 
-    @staticmethod
-    def delete_files(path: Path) -> Tuple[bool, str]:
+    def delete_files(self, path: Path) -> Tuple[bool, str]:
         """
         删除转移后的文件以及空目录
         :param path: 文件路径
@@ -670,26 +674,31 @@ class TransferChain(ChainBase):
 
         # 判断当前媒体父路径下是否有媒体文件，如有则无需遍历父级
         if not SystemUtils.exits_files(path.parent, settings.RMT_MEDIAEXT):
-            # 媒体库二级分类根路径
-            library_root_names = [
-                settings.LIBRARY_MOVIE_NAME or '电影',
-                settings.LIBRARY_TV_NAME or '电视剧',
-                settings.LIBRARY_ANIME_NAME or '动漫',
-            ]
-
+            # 所有媒体库根目录的名称
+            library_roots = self.directoryhelper.get_library_dirs()
+            library_root_names = [Path(library_root.path).name for library_root in library_roots if library_root.path]
+            # 所有二级分类的名称
+            category_names = []
+            category_conf = self.media_category()
+            if category_conf:
+                category_names += list(category_conf.keys())
+                for cats in category_conf.values():
+                    category_names += cats
             # 判断父目录是否为空, 为空则删除
             for parent_path in path.parents:
                 # 遍历父目录到媒体库二级分类根路径
-                if str(parent_path.name) in library_root_names:
+                if parent_path.name in library_root_names:
                     break
+                if parent_path.name in category_names:
+                    continue
                 if str(parent_path.parent) != str(path.root):
                     # 父目录非根目录，才删除父目录
                     if not SystemUtils.exits_files(parent_path, settings.RMT_MEDIAEXT):
                         # 当前路径下没有媒体文件则删除
                         try:
                             shutil.rmtree(parent_path)
+                            logger.warn(f"目录 {parent_path} 已删除")
                         except Exception as e:
                             logger.error(f"删除目录 {parent_path} 失败：{str(e)}")
                             return False, f"删除目录 {parent_path} 失败：{str(e)}"
-                        logger.warn(f"目录 {parent_path} 已删除")
         return True, ""

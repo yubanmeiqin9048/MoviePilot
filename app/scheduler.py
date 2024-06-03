@@ -18,10 +18,12 @@ from app.chain.tmdb import TmdbChain
 from app.chain.torrents import TorrentsChain
 from app.chain.transfer import TransferChain
 from app.core.config import settings
+from app.core.event import EventManager
 from app.core.plugin import PluginManager
 from app.helper.sites import SitesHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
+from app.schemas.types import EventType
 from app.utils.singleton import Singleton
 from app.utils.timer import TimerUtils
 
@@ -76,10 +78,10 @@ class Scheduler(metaclass=Singleton):
             __max_try__ = 30
             if self._auth_count > __max_try__:
                 SchedulerChain().messagehelper.put(title=f"用户认证失败",
-                                                   message="用户认证失败次数过多，将不再偿试认证！",
+                                                   message="用户认证失败次数过多，将不再尝试认证！",
                                                    role="system")
                 return
-            logger.info("用户未认证，正在偿试重新认证...")
+            logger.info("用户未认证，正在尝试重新认证...")
             status, msg = SitesHelper().check_user()
             if status:
                 self._auth_count = 0
@@ -95,7 +97,7 @@ class Scheduler(metaclass=Singleton):
                 self._auth_count += 1
                 logger.error(f"用户认证失败：{msg}，共失败 {self._auth_count} 次")
                 if self._auth_count >= __max_try__:
-                    logger.error("用户认证失败次数过多，将不再偿试认证！")
+                    logger.error("用户认证失败次数过多，将不再尝试认证！")
 
         # 各服务的运行状态
         self._jobs = {
@@ -370,6 +372,16 @@ class Scheduler(metaclass=Singleton):
             SchedulerChain().messagehelper.put(title=f"{job_name} 执行失败",
                                                message=str(e),
                                                role="system")
+            EventManager().send_event(
+                EventType.SystemError,
+                {
+                    "type": "scheduler",
+                    "scheduler_id": job_id,
+                    "scheduler_name": job_name,
+                    "error": str(e),
+                    "traceback": traceback.format_exc()
+                }
+            )
         # 运行结束
         with self._lock:
             try:

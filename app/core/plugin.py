@@ -26,7 +26,6 @@ from app.utils.system import SystemUtils
 
 
 class PluginMonitorHandler(FileSystemEventHandler):
-
     # 计时器
     __reload_timer = None
     # 防抖时间间隔
@@ -187,7 +186,10 @@ class PluginManager(metaclass=Singleton):
         :param pid: 插件ID，为空停止所有插件
         """
         # 停止插件
-        logger.info("正在停止所有插件...")
+        if pid:
+            logger.info(f"正在停止插件 {pid}...")
+        else:
+            logger.info("正在停止所有插件...")
         for plugin_id, plugin in self._running_plugins.items():
             if pid and plugin_id != pid:
                 continue
@@ -341,11 +343,13 @@ class PluginManager(metaclass=Singleton):
             return plugin.get_page() or []
         return []
 
-    def get_plugin_dashboard(self, pid: str, **kwargs) -> Optional[schemas.PluginDashboard]:
+    def get_plugin_dashboard(self, pid: str, key: str, **kwargs) -> Optional[schemas.PluginDashboard]:
         """
         获取插件仪表盘
         :param pid: 插件ID
+        :param key: 仪表盘key
         """
+
         def __get_params_count(func: Callable):
             """
             获取函数的参数信息
@@ -358,7 +362,10 @@ class PluginManager(metaclass=Singleton):
             return None
         if hasattr(plugin, "get_dashboard"):
             # 检查方法的参数个数
-            if __get_params_count(plugin.get_dashboard) > 0:
+            params_count = __get_params_count(plugin.get_dashboard)
+            if params_count > 1:
+                dashboard: Tuple = plugin.get_dashboard(key=key, **kwargs)
+            elif params_count > 0:
                 dashboard: Tuple = plugin.get_dashboard(**kwargs)
             else:
                 dashboard: Tuple = plugin.get_dashboard()
@@ -367,6 +374,7 @@ class PluginManager(metaclass=Singleton):
                 return schemas.PluginDashboard(
                     id=pid,
                     name=plugin.plugin_name,
+                    key=key or "",
                     cols=cols or {},
                     elements=elements,
                     attrs=attrs or {}
@@ -442,24 +450,35 @@ class PluginManager(metaclass=Singleton):
                     logger.error(f"获取插件 {pid} 服务出错：{str(e)}")
         return ret_services
 
-    def get_dashboard_plugins(self) -> List[dict]:
+    def get_plugin_dashboard_meta(self):
         """
-        获取有仪表盘的插件列表
+        获取所有插件仪表盘元信息
         """
-        dashboards = []
-        for pid, plugin in self._running_plugins.items():
-            if hasattr(plugin, "get_dashboard") \
-                    and ObjectUtils.check_method(plugin.get_dashboard):
-                try:
-                    if not plugin.get_state():
-                        continue
-                    dashboards.append({
-                        "id": pid,
-                        "name": plugin.plugin_name
+        dashboard_meta = []
+        for plugin_id, plugin in self._running_plugins.items():
+            if not hasattr(plugin, "get_dashboard") or not ObjectUtils.check_method(plugin.get_dashboard):
+                continue
+            try:
+                if not plugin.get_state():
+                    continue
+                # 如果是多仪表盘实现
+                if hasattr(plugin, "get_dashboard_meta") and ObjectUtils.check_method(plugin.get_dashboard_meta):
+                    meta = plugin.get_dashboard_meta()
+                    if meta:
+                        dashboard_meta.extend([{
+                            "id": plugin_id,
+                            "name": m.get("name"),
+                            "key": m.get("key"),
+                        } for m in meta if m])
+                else:
+                    dashboard_meta.append({
+                        "id": plugin_id,
+                        "name": plugin.plugin_name,
+                        "key": "",
                     })
-                except Exception as e:
-                    logger.error(f"获取有仪表盘的插件出错：{str(e)}")
-        return dashboards
+            except Exception as e:
+                logger.error(f"获取插件[{plugin_id}]仪表盘元数据出错：{str(e)}")
+        return dashboard_meta
 
     def get_plugin_attr(self, pid: str, attr: str) -> Any:
         """
@@ -600,24 +619,27 @@ class PluginManager(metaclass=Singleton):
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = []
             for m in settings.PLUGIN_MARKET.split(","):
+                if not m:
+                    continue
                 futures.append(executor.submit(__get_plugin_info, m))
             for future in concurrent.futures.as_completed(futures):
                 plugins = future.result()
                 if plugins:
                     all_plugins.extend(plugins)
+        # 去重
+        all_plugins = list({f"{p.id}{p.plugin_version}": p for p in all_plugins}.values())
         # 所有插件按repo在设置中的顺序排序
         all_plugins.sort(
             key=lambda x: settings.PLUGIN_MARKET.split(",").index(x.repo_url) if x.repo_url else 0
         )
-        # 按插件ID和版本号去重，相同插件以前面的为准
-        result = []
-        _dup = []
+        # 相同ID的插件保留版本号最大版本
+        max_versions = {}
         for p in all_plugins:
-            key = f"{p.id}v{p.plugin_version}"
-            if key not in _dup:
-                _dup.append(key)
-                result.append(p)
-        logger.info(f"共获取到 {len(result)} 个第三方插件")
+            if p.id not in max_versions or StringUtils.compare_version(p.plugin_version, max_versions[p.id]) > 0:
+                max_versions[p.id] = p.plugin_version
+        result = [p for p in all_plugins if
+                  p.plugin_version == max_versions[p.id]]
+        logger.info(f"共获取到 {len(result)} 个线上插件")
         return result
 
     def get_local_plugins(self) -> List[schemas.Plugin]:

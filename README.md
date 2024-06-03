@@ -6,6 +6,8 @@
 
 发布频道：https://t.me/moviepilot_channel
 
+Wiki：https://wiki.movie-pilot.org
+
 ## 主要特性
 - 前后端分离，基于FastApi + Vue3，前端项目地址：[MoviePilot-Frontend](https://github.com/jxxghp/MoviePilot-Frontend)，API：http://localhost:3001/docs
 - 聚焦核心需求，简化功能和设置，部分设置项可直接使用默认值。
@@ -48,7 +50,7 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 - Windows
 
   1. 独立执行文件版本：下载 [MoviePilot.exe](https://github.com/jxxghp/MoviePilot/releases)，双击运行后自动生成配置文件目录，访问：http://localhost:3000
-  2. 安装包版本：[Windows-MoviePilot](https://github.com/developer-wlj/Windows-MoviePilot)
+  2. 安装包版本【推荐】：[Windows-MoviePilot](https://github.com/developer-wlj/Windows-MoviePilot)
 
 - 群晖套件
 
@@ -116,8 +118,8 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 - **DOH_ENABLE：** DNS over HTTPS开关，`true`/`false`，默认`true`，开启后会使用DOH对api.themoviedb.org等域名进行解析，以减少被DNS污染的情况，提升网络连通性
 - **META_CACHE_EXPIRE：** 元数据识别缓存过期时间（小时），数字型，不配置或者配置为0时使用系统默认（大内存模式为7天，否则为3天），调大该值可减少themoviedb的访问次数
 - **GITHUB_TOKEN：** Github token，提高自动更新、插件安装等请求Github Api的限流阈值，格式：ghp_****
+- **GITHUB_PROXY：** Github代理地址，用于加速版本及插件升级安装，格式：`https://mirror.ghproxy.com/`
 - **DEV:** 开发者模式，`true`/`false`，默认`false`，仅用于本地开发使用，开启后会暂停所有定时任务，且插件代码文件的修改无需重启会自动重载生效
-- **PLUGIN_AUTO_RELOAD:** 插件热加载，`true`/`false`，默认`false`，开启后插件代码文件的修改无需重启会自动重载生效
 - **AUTO_UPDATE_RESOURCE**：启动时自动检测和更新资源包（站点索引及认证等），`true`/`false`，默认`true`，需要能正常连接Github，仅支持Docker镜像
 ---
 - **TMDB_API_DOMAIN：** TMDB API地址，默认`api.themoviedb.org`，也可配置为`api.tmdb.org`、`tmdb.movie-pilot.org` 或其它中转代理服务地址，能连通即可
@@ -208,16 +210,17 @@ MoviePilot需要配套下载器和媒体服务器配合使用。
 - 通过CookieCloud同步快速添加站点，不需要使用的站点可在WEB管理界面中禁用或删除，无法同步的站点也可手动新增。
 - 需要通过环境变量设置用户认证信息且认证成功后才能使用站点相关功能，未认证通过时站点相关的插件也会无法显示。
 ### 3. **文件整理**
-- 默认通过监控下载器实现下载完成后自动整理入库并刮削媒体信息，需要后台打开`下载器监控`开关，且仅会处理通过MoviePilot添加下载的任务。
+- 默认通过监控下载器实现下载完成后自动整理入库并刮削媒体信息，需要后台打开`下载器监控`开关，并在设定中维护好下载目录和媒体库目录，且仅会处理通过MoviePilot添加下载的任务（含`MOVIEPILOT`标签）。
 - 下载器监控默认轮循间隔为5分钟，如果是使用qbittorrent，可在 `QB设置`->`下载完成时运行外部程序` 处填入：`curl "http://localhost:3000/api/v1/transfer/now?token=moviepilot" `，实现无需等待轮循下载完成后立即整理入库（地址、端口和token按实际调整，curl也可更换为wget）。
-- 使用`目录监控`等插件实现更灵活的自动整理。
+- 使用`目录监控`等插件实现更灵活的自动整理（使用MoviePilot整理其它途径下载的资源时使用）。
 ### 4. **通知交互**
 - 支持通过`微信`/`Telegram`/`Slack`/`SynologyChat`/`VoceChat`等渠道远程管理和订阅下载，其中 微信/Telegram 将会自动添加操作菜单（微信菜单条数有限制，部分菜单不显示）。
 - `微信`回调地址、`SynologyChat`传入地址地址相对路径均为：`/api/v1/message/`；`VoceChat`的Webhook地址相对路径为：`/api/v1/message/?token=moviepilot`，其中moviepilot为设置的`API_TOKEN`。
+- 插件市场中有其它渠道的通知插件（仅支持单向通知），可安装使用。
 ### 5. **订阅与搜索**
 - 通过MoviePilot管理后台搜索和订阅。
 - 将MoviePilot做为`Radarr`或`Sonarr`服务器添加到`Overseerr`或`Jellyseerr`，可使用`Overseerr/Jellyseerr`浏览和添加订阅。
-- 安装`豆瓣榜单订阅`、`猫眼订阅`等插件，实现自动订阅豆瓣榜单、猫眼榜单等。
+- 安装`豆瓣榜单订阅`、`猫眼订阅`、`热门订阅`等插件，实现自动订阅各类榜单。
 ### 6. **其他**
 - 通过设置媒体服务器Webhook指向MoviePilot（相对路径为`/api/v1/webhook?token=moviepilot`，其中`moviepilot`为设置的`API_TOKEN`），可实现通过MoviePilot发送播放通知，以及配合各类插件实现播放限速等功能。
 - 映射宿主机`docker.sock`文件到容器`/var/run/docker.sock`，可支持应用内建重启操作。实例：`-v /var/run/docker.sock:/var/run/docker.sock:ro`。

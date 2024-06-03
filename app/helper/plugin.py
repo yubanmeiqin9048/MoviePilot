@@ -20,13 +20,13 @@ class PluginHelper(metaclass=Singleton):
     插件市场管理，下载安装插件到本地
     """
 
-    _base_url = "https://raw.githubusercontent.com/%s/%s/main/"
+    _base_url = f"{settings.GITHUB_PROXY}https://raw.githubusercontent.com/%s/%s/main/"
 
-    _install_reg = "https://movie-pilot.org/plugin/install/%s"
+    _install_reg = f"{settings.MP_SERVER_HOST}/plugin/install/%s"
 
-    _install_report = "https://movie-pilot.org/plugin/install"
+    _install_report = f"{settings.MP_SERVER_HOST}/plugin/install"
 
-    _install_statistic = "https://movie-pilot.org/plugin/statistic"
+    _install_statistic = f"{settings.MP_SERVER_HOST}/plugin/statistic"
 
     def __init__(self):
         self.systemconfig = SystemConfigOper()
@@ -157,9 +157,10 @@ class PluginHelper(metaclass=Singleton):
                 return False, "文件列表为空"
             for item in _l:
                 if item.get("download_url"):
+                    download_url = f"{settings.GITHUB_PROXY}{item.get('download_url')}"
                     # 下载插件文件
                     res = RequestUtils(proxies=settings.PROXY,
-                                       headers=settings.GITHUB_HEADERS, timeout=60).get_res(item["download_url"])
+                                       headers=settings.GITHUB_HEADERS, timeout=60).get_res(download_url)
                     if not res:
                         return False, f"文件 {item.get('name')} 下载失败！"
                     elif res.status_code != 200:

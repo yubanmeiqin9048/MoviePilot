@@ -317,7 +317,7 @@ class Plex:
             # 否则一个一个刷新
             for path, lib_key in result_dict.items():
                 logger.info(f"刷新媒体库：{lib_key} - {path}")
-                self._plex.query(f'/library/sections/{lib_key}/refresh?path={quote_plus(path)}')
+                self._plex.query(f'/library/sections/{lib_key}/refresh?path={quote_plus(str(Path(path).parent))}')
 
     @staticmethod
     def __find_librarie(path: Path, libraries: List[Any]) -> Tuple[str, str]:
@@ -708,6 +708,10 @@ class Plex:
                     title = "%s 第%s季 第%s集" % (item.grandparentTitle, item.parentIndex, item.index)
                     thumb = (item.parentThumb or item.grandparentThumb or '').lstrip('/')
                     image = (self._host + thumb + f"?X-Plex-Token={self._token}")
+                elif item.TYPE == "show":
+                    item_type = MediaType.TV.value
+                    title = "%s 共%s季" % (item.title, item.seasonCount)
+                    image = item.posterUrl
                 link = self.get_play_url(item.key)
                 ret_resume.append(schemas.MediaServerPlayItem(
                     id=item.key,
@@ -717,7 +721,5 @@ class Plex:
                     image=image,
                     link=link
                 ))
-
             offset += num
-
         return ret_resume[:num]

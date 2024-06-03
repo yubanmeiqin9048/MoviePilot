@@ -15,7 +15,6 @@ class CategoryHelper(metaclass=Singleton):
     _categorys = {}
     _movie_categorys = {}
     _tv_categorys = {}
-    _anime_categorys = {}
 
     def __init__(self):
         self._category_path: Path = settings.CONFIG_PATH / "category.yaml"
@@ -25,9 +24,6 @@ class CategoryHelper(metaclass=Singleton):
         """
         初始化
         """
-        # 二级分类策略关闭
-        if not settings.LIBRARY_CATEGORY:
-            return
         try:
             if not self._category_path.exists():
                 shutil.copy(settings.INNER_CONFIG_PATH / "category.yaml", self._category_path)
@@ -44,7 +40,6 @@ class CategoryHelper(metaclass=Singleton):
         if self._categorys:
             self._movie_categorys = self._categorys.get('movie')
             self._tv_categorys = self._categorys.get('tv')
-            self._anime_categorys = self._categorys.get('anime')
         logger.info(f"已加载二级分类策略 category.yaml")
 
     @property
@@ -83,15 +78,6 @@ class CategoryHelper(metaclass=Singleton):
             return []
         return self._tv_categorys.keys()
 
-    @property
-    def anime_categorys(self) -> list:
-        """
-        获取动漫分类清单
-        """
-        if not self._anime_categorys:
-            return []
-        return self._anime_categorys.keys()
-
     def get_movie_category(self, tmdb_info) -> str:
         """
         判断电影的分类
@@ -106,10 +92,6 @@ class CategoryHelper(metaclass=Singleton):
         :param tmdb_info: 识别的TMDB中的信息
         :return: 二级分类的名称
         """
-        genre_ids = tmdb_info.get("genre_ids") or []
-        if self._anime_categorys and genre_ids \
-                and set(genre_ids).intersection(set(settings.ANIME_GENREIDS)):
-            return self.get_category(self._anime_categorys, tmdb_info)
         return self.get_category(self._tv_categorys, tmdb_info)
 
     @staticmethod
@@ -144,7 +126,7 @@ class CategoryHelper(metaclass=Singleton):
                         info_values = [str(info_value).upper()]
 
                 if value.find(",") != -1:
-                    values = [str(val).upper() for val in value.split(",")]
+                    values = [str(val).upper() for val in value.split(",") if val]
                 else:
                     values = [str(value).upper()]
 

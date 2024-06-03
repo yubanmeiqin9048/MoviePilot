@@ -185,6 +185,7 @@ class TransmissionModule(_ModuleBase):
                     title=torrent.name,
                     path=Path(torrent.download_dir) / torrent.name,
                     hash=torrent.hashString,
+                    size=torrent.total_size,
                     tags=",".join(torrent.labels or [])
                 ))
         elif status == TorrentStatus.TRANSFER:
@@ -230,7 +231,7 @@ class TransmissionModule(_ModuleBase):
             return None
         return ret_torrents
 
-    def transfer_completed(self, hashs: Union[str, list], path: Path = None,
+    def transfer_completed(self, hashs: str, path: Path = None,
                            downloader: str = settings.DEFAULT_DOWNLOADER) -> None:
         """
         转移完成后的处理
@@ -241,7 +242,14 @@ class TransmissionModule(_ModuleBase):
         """
         if downloader != "transmission":
             return None
-        self.transmission.set_torrent_tag(ids=hashs, tags=['已整理'])
+        # 获取原标签
+        org_tags = self.transmission.get_torrent_tags(ids=hashs)
+        # 种子打上已整理标签
+        if org_tags:
+            tags = org_tags + ['已整理']
+        else:
+            tags = ['已整理']
+        self.transmission.set_torrent_tag(ids=hashs, tags=tags)
         # 移动模式删除种子
         if settings.TRANSFER_TYPE == "move":
             if self.remove_torrents(hashs):

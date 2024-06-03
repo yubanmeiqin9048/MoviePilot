@@ -16,6 +16,7 @@ from app.core.event import eventmanager, Event, EventManager
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
 from app.db.models.subscribe import Subscribe
+from app.db.site_oper import SiteOper
 from app.db.subscribe_oper import SubscribeOper
 from app.db.subscribehistory_oper import SubscribeHistoryOper
 from app.db.systemconfig_oper import SystemConfigOper
@@ -44,6 +45,7 @@ class SubscribeChain(ChainBase):
         self.message = MessageHelper()
         self.systemconfig = SystemConfigOper()
         self.torrenthelper = TorrentHelper()
+        self.siteoper = SiteOper()
 
     def add(self, title: str, year: str,
             mtype: MediaType = None,
@@ -241,7 +243,11 @@ class SubscribeChain(ChainBase):
             meta = MetaInfo(subscribe.name)
             meta.year = subscribe.year
             meta.begin_season = subscribe.season or None
-            meta.type = MediaType(subscribe.type)
+            try:
+                meta.type = MediaType(subscribe.type)
+            except ValueError:
+                logger.error(f'订阅 {subscribe.name} 类型错误：{subscribe.type}')
+                continue
             # 识别媒体信息
             mediainfo: MediaInfo = self.recognize_media(meta=meta, mtype=meta.type,
                                                         tmdbid=subscribe.tmdbid,
@@ -458,14 +464,29 @@ class SubscribeChain(ChainBase):
     def get_sub_sites(self, subscribe: Subscribe) -> List[int]:
         """
         获取订阅中涉及的站点清单
+        :param subscribe: 订阅信息对象
+        :return: 涉及的站点清单
         """
-        if subscribe.sites:
-            try:
-                return json.loads(subscribe.sites)
-            except JSONDecodeError:
-                return []
-        # 默认站点
-        return self.systemconfig.get(SystemConfigKey.RssSites) or []
+        # 从系统配置获取默认订阅站点
+        default_sites = self.systemconfig.get(SystemConfigKey.RssSites) or []
+        # 如果订阅未指定站点信息，直接返回默认站点
+        if not subscribe.sites:
+            return default_sites
+        try:
+            # 尝试解析订阅中的站点数据
+            user_sites = json.loads(subscribe.sites)
+            # 计算 user_sites 和 default_sites 的交集
+            intersection_sites = [site for site in user_sites if site in default_sites]
+            # 如果交集与原始订阅不一致，更新数据库
+            if set(intersection_sites) != set(user_sites):
+                self.subscribeoper.update(subscribe.id, {
+                    "sites": json.dumps(intersection_sites)
+                })
+            # 如果交集为空，返回默认站点
+            return intersection_sites if intersection_sites else default_sites
+        except JSONDecodeError:
+            # 如果 JSON 解析失败，返回默认站点
+            return default_sites
 
     def get_subscribed_sites(self) -> Optional[List[int]]:
         """
@@ -512,6 +533,8 @@ class SubscribeChain(ChainBase):
         if not torrents:
             logger.warn('没有缓存资源，无法匹配订阅')
             return
+        # 记录重新识别过的种子
+        _recognize_cached = []
         # 所有订阅
         subscribes = self.subscribeoper.list('R')
         # 遍历订阅
@@ -522,7 +545,20 @@ class SubscribeChain(ChainBase):
             meta = MetaInfo(subscribe.name)
             meta.year = subscribe.year
             meta.begin_season = subscribe.season or None
-            meta.type = MediaType(subscribe.type)
+            try:
+                meta.type = MediaType(subscribe.type)
+            except ValueError:
+                logger.error(f'订阅 {subscribe.name} 类型错误：{subscribe.type}')
+                continue
+            # 订阅的站点域名列表
+            domains = []
+            if subscribe.sites:
+                try:
+                    siteids = json.loads(subscribe.sites)
+                    if siteids:
+                        domains = self.siteoper.get_domains_by_ids(siteids)
+                except JSONDecodeError:
+                    pass
             # 识别媒体信息
             mediainfo: MediaInfo = self.recognize_media(meta=meta, mtype=meta.type,
                                                         tmdbid=subscribe.tmdbid,
@@ -591,15 +627,38 @@ class SubscribeChain(ChainBase):
             # 遍历缓存种子
             _match_context = []
             for domain, contexts in torrents.items():
-                logger.info(f'开始匹配站点：{domain}，共缓存了 {len(contexts)} 个种子...')
+                if domains and domain not in domains:
+                    continue
+                logger.debug(f'开始匹配站点：{domain}，共缓存了 {len(contexts)} 个种子...')
                 for context in contexts:
                     # 检查是否匹配
                     torrent_meta = context.meta_info
                     torrent_mediainfo = context.media_info
                     torrent_info = context.torrent_info
-                    # 如果识别了媒体信息，则比对TMDBID和类型
-                    if torrent_mediainfo.tmdb_id or torrent_mediainfo.douban_id:
-                        # 直接比对媒体信息
+
+                    # 先判断是否有没识别的种子
+                    if not torrent_mediainfo or (not torrent_mediainfo.tmdb_id and not torrent_mediainfo.douban_id):
+                        _cache_key = f"{torrent_info.title}_{torrent_info.description}"
+                        if _cache_key not in _recognize_cached:
+                            _recognize_cached.append(_cache_key)
+                            logger.info(f'{torrent_info.site_name} - {torrent_info.title} 订阅缓存为未识别状态，尝试重新识别...')
+                            # 重新识别（不使用缓存）
+                            torrent_mediainfo = self.recognize_media(meta=torrent_meta, cache=False)
+                            if not torrent_mediainfo:
+                                logger.warn(f'{torrent_info.site_name} - {torrent_info.title} 重新识别失败，尝试通过标题匹配...')
+                                if self.torrenthelper.match_torrent(mediainfo=mediainfo,
+                                                                    torrent_meta=torrent_meta,
+                                                                    torrent=torrent_info):
+                                    # 匹配成功
+                                    logger.info(f'{mediainfo.title_year} 通过标题匹配到资源：{torrent_info.site_name} - {torrent_info.title}')
+                                    # 更新缓存
+                                    torrent_mediainfo = mediainfo
+                                    context.media_info = mediainfo
+                                else:
+                                    continue
+
+                    # 直接比对媒体信息
+                    if torrent_mediainfo and (torrent_mediainfo.tmdb_id or torrent_mediainfo.douban_id):
                         if torrent_mediainfo.type != mediainfo.type:
                             continue
                         if torrent_mediainfo.tmdb_id \
@@ -611,22 +670,8 @@ class SubscribeChain(ChainBase):
                         logger.info(
                             f'{mediainfo.title_year} 通过媒体信ID匹配到资源：{torrent_info.site_name} - {torrent_info.title}')
                     else:
-                        # 没有torrent_mediainfo媒体信息，按标题匹配
-                        manual_match = False
-                        # 比对词条指定的tmdbid
-                        if torrent_meta.tmdbid or torrent_meta.doubanid:
-                            if torrent_meta.tmdbid and torrent_meta.tmdbid != mediainfo.tmdb_id:
-                                continue
-                            if torrent_meta.doubanid and torrent_meta.doubanid != mediainfo.douban_id:
-                                continue
-                            manual_match = True
-                        if not manual_match:
-                            # 没有指定tmdbid，按标题匹配
-                            if not self.torrenthelper.match_torrent(mediainfo=mediainfo,
-                                                                    torrent_meta=torrent_meta,
-                                                                    torrent=torrent_info,
-                                                                    logerror=False):
-                                continue
+                        continue
+
                     # 优先级过滤规则
                     if subscribe.best_version:
                         priority_rule = self.systemconfig.get(SystemConfigKey.BestVersionFilterRules)
@@ -638,28 +683,28 @@ class SubscribeChain(ChainBase):
                         mediainfo=torrent_mediainfo)
                     if result is not None and not result:
                         # 不符合过滤规则
-                        logger.info(f"{torrent_info.title} 不匹配当前过滤规则")
+                        logger.debug(f"{torrent_info.title} 不匹配当前过滤规则")
                         continue
 
                     # 不在订阅站点范围的不处理
                     sub_sites = self.get_sub_sites(subscribe)
                     if sub_sites and torrent_info.site not in sub_sites:
-                        logger.info(f"{torrent_info.site_name} - {torrent_info.title} 不符合订阅站点要求")
+                        logger.debug(f"{torrent_info.site_name} - {torrent_info.title} 不符合订阅站点要求")
                         continue
 
                     # 如果是电视剧
                     if torrent_mediainfo.type == MediaType.TV:
                         # 有多季的不要
                         if len(torrent_meta.season_list) > 1:
-                            logger.info(f'{torrent_info.title} 有多季，不处理')
+                            logger.debug(f'{torrent_info.title} 有多季，不处理')
                             continue
                         # 比对季
                         if torrent_meta.begin_season:
                             if meta.begin_season != torrent_meta.begin_season:
-                                logger.info(f'{torrent_info.title} 季不匹配')
+                                logger.debug(f'{torrent_info.title} 季不匹配')
                                 continue
                         elif meta.begin_season != 1:
-                            logger.info(f'{torrent_info.title} 季不匹配')
+                            logger.debug(f'{torrent_info.title} 季不匹配')
                             continue
                         # 非洗版
                         if not subscribe.best_version:
@@ -674,7 +719,7 @@ class SubscribeChain(ChainBase):
                                             not set(no_exists_info.episodes).intersection(
                                                 set(torrent_meta.episode_list)
                                             ):
-                                        logger.info(
+                                        logger.debug(
                                             f'{torrent_info.title} 对应剧集 {torrent_meta.episode_list} 未包含缺失的剧集'
                                         )
                                         continue
@@ -686,7 +731,7 @@ class SubscribeChain(ChainBase):
                             # 洗版时，非整季不要
                             if meta.type == MediaType.TV:
                                 if torrent_meta.episode_list:
-                                    logger.info(f'{subscribe.name} 正在洗版，{torrent_info.title} 不是整季')
+                                    logger.debug(f'{subscribe.name} 正在洗版，{torrent_info.title} 不是整季')
                                     continue
 
                     # 过滤规则
@@ -740,7 +785,11 @@ class SubscribeChain(ChainBase):
             meta = MetaInfo(subscribe.name)
             meta.year = subscribe.year
             meta.begin_season = subscribe.season or None
-            meta.type = MediaType(subscribe.type)
+            try:
+                meta.type = MediaType(subscribe.type)
+            except ValueError:
+                logger.error(f'订阅 {subscribe.name} 类型错误：{subscribe.type}')
+                continue
             # 识别媒体信息
             mediainfo: MediaInfo = self.recognize_media(meta=meta, mtype=meta.type,
                                                         tmdbid=subscribe.tmdbid,
