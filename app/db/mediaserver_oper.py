@@ -1,5 +1,5 @@
 import json
-from typing import Optional
+from typing import Optional, List
 
 from sqlalchemy.orm import Session
 
@@ -35,33 +35,32 @@ class MediaServerOper(DbOper):
         """
         判断媒体服务器数据是否存在
         """
+        items = []
+        items_valid= []
         if kwargs.get("tmdbid"):
             # 优先按TMDBID查
-            item = MediaServerItem.exist_by_tmdbid(self._db, tmdbid=kwargs.get("tmdbid"),
+            items = MediaServerItem.exist_by_tmdbid(self._db, tmdbid=kwargs.get("tmdbid"),
                                                    mtype=kwargs.get("mtype"))
         elif kwargs.get("title"):
             # 按标题、类型、年份查
-            item = MediaServerItem.exists_by_title(self._db, title=kwargs.get("title"),
+            items= MediaServerItem.exists_by_title(self._db, title=kwargs.get("title"),
                                                    mtype=kwargs.get("mtype"), year=kwargs.get("year"))
         else:
-            return None
-        if not item:
-            return None
-
-        if kwargs.get("season"):
-            # 判断季是否存在
-            if not item.seasoninfo:
-                return None
-            seasoninfo = json.loads(item.seasoninfo) or {}
-            if kwargs.get("season") not in seasoninfo.keys():
-                return None
-        return item
-
-    def get_item_id(self, **kwargs) -> Optional[str]:
+            return items_valid
+        for item in items:
+            if kwargs.get("season"):
+                # 判断季是否存在
+                if not item.seasoninfo:
+                    continue
+                seasoninfo = json.loads(item.seasoninfo) or {}
+                if kwargs.get("season") not in seasoninfo.keys():
+                    continue
+                items_valid.append(item)
+        return items_valid if items_valid else items
+    
+    def get_item_id_list(self, **kwargs) -> List[str]:
         """
         获取媒体服务器数据ID
         """
-        item = self.exists(**kwargs)
-        if not item:
-            return None
-        return str(item.item_id)
+        items = self.exists(**kwargs)
+        return [str(item.item_id) for item in items]
