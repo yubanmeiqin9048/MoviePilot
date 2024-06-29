@@ -142,7 +142,7 @@ class StringUtils:
         """
         判断是否为英文单词，有空格时返回False
         """
-        return word.isalpha()
+        return word.encode().isalpha()
 
     @staticmethod
     def str_int(text: str) -> int:
@@ -384,6 +384,21 @@ class StringUtils:
             return timestamp
 
     @staticmethod
+    def str_to_timestamp(date_str: str) -> float:
+        """
+        日期转时间戳
+        :param date_str:
+        :return:
+        """
+        if not date_str:
+            return 0
+        try:
+            return dateparser.parse(date_str).timestamp()
+        except Exception as e:
+            print(str(e))
+            return 0
+
+    @staticmethod
     def to_bool(text: str, default_val: bool = False) -> bool:
         """
         字符串转bool
@@ -604,19 +619,27 @@ class StringUtils:
     def get_domain_address(address: str, prefix: bool = True) -> Tuple[Optional[str], Optional[int]]:
         """
         从地址中获取域名和端口号
+        :param address: 地址
+        :param prefix：返回域名是否要包含协议前缀
         """
         if not address:
             return None, None
+        # 去掉末尾的/
+        address = address.rstrip("/")
         if prefix and not address.startswith("http"):
+            # 如果需要包含协议前缀，但地址不包含协议前缀，则添加
             address = "http://" + address
+        elif not prefix and address.startswith("http"):
+            # 如果不需要包含协议前缀，但地址包含协议前缀，则去掉
+            address = address.split("://")[-1]
+        # 拆分域名和端口号
         parts = address.split(":")
         if len(parts) > 3:
             # 处理不希望包含多个冒号的情况（除了协议后的冒号）
             return None, None
-        domain = ":".join(parts[:-1])
-        if domain.endswith("/"):
-            domain = domain[:-1]
-        # 检查是否包含端口号
+        # 不含端口地址
+        domain = ":".join(parts[:-1]).rstrip('/')
+        # 端口号
         try:
             port = int(parts[-1])
         except ValueError:

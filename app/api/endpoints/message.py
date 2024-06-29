@@ -1,13 +1,15 @@
+import json
 from typing import Union, Any, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi import Request
+from pywebpush import WebPushException, webpush
 from sqlalchemy.orm import Session
 from starlette.responses import PlainTextResponse
 
 from app import schemas
 from app.chain.message import MessageChain
-from app.core.config import settings
+from app.core.config import settings, global_vars
 from app.core.security import verify_token
 from app.db import get_db
 from app.db.models import User
@@ -154,4 +156,37 @@ def set_switchs(switchs: List[NotificationSwitch],
     # 存入数据库
     SystemConfigOper().set(SystemConfigKey.NotificationChannels, switch_list)
 
+    return schemas.Response(success=True)
+
+
+@router.post("/webpush/subscribe", summary="客户端webpush通知订阅", response_model=schemas.Response)
+def subscribe(subscription: schemas.Subscription, _: schemas.TokenPayload = Depends(verify_token)):
+    """
+    客户端webpush通知订阅
+    """
+    subinfo = subscription.dict()
+    if subinfo not in global_vars.get_subscriptions():
+        global_vars.push_subscription(subinfo)
+    logger.debug(f"通知订阅成功: {subinfo}")
+    return schemas.Response(success=True)
+
+
+@router.post("/webpush/send", summary="发送webpush通知", response_model=schemas.Response)
+def send_notification(payload: schemas.SubscriptionMessage, _: schemas.TokenPayload = Depends(verify_token)):
+    """
+    发送webpush通知
+    """
+    for sub in global_vars.get_subscriptions():
+        try:
+            webpush(
+                subscription_info=sub,
+                data=json.dumps(payload.dict()),
+                vapid_private_key=settings.VAPID.get("privateKey"),
+                vapid_claims={
+                    "sub": settings.VAPID.get("subject")
+                },
+            )
+        except WebPushException as err:
+            logger.error(f"WebPush发送失败: {str(err)}")
+            continue
     return schemas.Response(success=True)

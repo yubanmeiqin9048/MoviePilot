@@ -5,8 +5,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app import schemas
+from app.chain.media import MediaChain
 from app.chain.transfer import TransferChain
-from app.core.security import verify_token, verify_uri_token
+from app.core.metainfo import MetaInfoPath
+from app.core.security import verify_token, verify_apitoken
 from app.db import get_db
 from app.db.models.transferhistory import TransferHistory
 from app.schemas import MediaType
@@ -14,8 +16,41 @@ from app.schemas import MediaType
 router = APIRouter()
 
 
+@router.get("/name", summary="查询整理后的名称", response_model=schemas.Response)
+def query_name(path: str, filetype: str,
+               _: schemas.TokenPayload = Depends(verify_token)) -> Any:
+    """
+    查询整理后的名称
+    :param path: 文件路径
+    :param filetype: 文件类型
+    :param _: Token校验
+    """
+    meta = MetaInfoPath(Path(path))
+    mediainfo = MediaChain().recognize_media(meta)
+    if not mediainfo:
+        return schemas.Response(success=False, message="未识别到媒体信息")
+    new_path = TransferChain().recommend_name(meta=meta, mediainfo=mediainfo)
+    if not new_path:
+        return schemas.Response(success=False, message="未识别到新名称")
+    if filetype == "dir":
+        parents = Path(new_path).parents
+        if len(parents) > 2:
+            new_name = parents[1].name
+        else:
+            new_name = parents[0].name
+    else:
+        new_name = Path(new_path).name
+    return schemas.Response(success=True, data={
+        "name": new_name
+    })
+
+
 @router.post("/manual", summary="手动转移", response_model=schemas.Response)
-def manual_transfer(path: str = None,
+def manual_transfer(storage: str = "local",
+                    path: str = None,
+                    drive_id: str = None,
+                    fileid: str = None,
+                    filetype: str = None,
                     logid: int = None,
                     target: str = None,
                     tmdbid: int = None,
@@ -33,7 +68,11 @@ def manual_transfer(path: str = None,
                     _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     手动转移，文件或历史记录，支持自定义剧集识别格式
+    :param storage: 存储类型：local/aliyun/u115
     :param path: 转移路径或文件
+    :param drive_id: 云盘ID（网盘等）
+    :param fileid: 文件ID（网盘等）
+    :param filetype: 文件类型，dir/file
     :param logid: 转移历史记录ID
     :param target: 目标路径
     :param type_name: 媒体类型、电影/电视剧
@@ -88,7 +127,11 @@ def manual_transfer(path: str = None,
         )
     # 开始转移
     state, errormsg = transfer.manual_transfer(
+        storage=storage,
         in_path=in_path,
+        drive_id=drive_id,
+        fileid=fileid,
+        filetype=filetype,
         target=target,
         tmdbid=tmdbid,
         doubanid=doubanid,
@@ -110,7 +153,7 @@ def manual_transfer(path: str = None,
 
 
 @router.get("/now", summary="立即执行下载器文件整理", response_model=schemas.Response)
-def now(_: str = Depends(verify_uri_token)) -> Any:
+def now(_: str = Depends(verify_apitoken)) -> Any:
     """
     立即执行下载器文件整理 API_TOKEN认证（?token=xxx）
     """

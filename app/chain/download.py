@@ -89,7 +89,8 @@ class DownloadChain(ChainBase):
             title=f"{mediainfo.title_year} "
                   f"{'%s %s' % (meta.season, download_episodes) if download_episodes else meta.season_episode} 开始下载",
             text=msg_text,
-            image=mediainfo.get_message_image()))
+            image=mediainfo.get_message_image(),
+            link=settings.MP_DOMAIN('/#/downloading')))
 
     def download_torrent(self, torrent: TorrentInfo,
                          channel: MessageChannel = None,
@@ -214,6 +215,13 @@ class DownloadChain(ChainBase):
         _torrent = context.torrent_info
         _media = context.media_info
         _meta = context.meta_info
+
+        # 补充完整的media数据
+        if not _media.genre_ids:
+            new_media = self.recognize_media(mtype=_media.type, tmdbid=_media.tmdb_id,
+                                             doubanid=_media.douban_id, bangumiid=_media.bangumi_id)
+            if new_media:
+                _media = new_media
 
         # 实际下载的集数
         download_episodes = StringUtils.format_ep(list(episodes)) if episodes else None
@@ -841,7 +849,9 @@ class DownloadChain(ChainBase):
                 channel=channel,
                 mtype=NotificationType.Download,
                 title="没有正在下载的任务！",
-                userid=userid))
+                userid=userid,
+                link=settings.MP_DOMAIN('#/downloading')
+            ))
             return
         # 发送消息
         title = f"共 {len(torrents)} 个任务正在下载："
@@ -853,8 +863,13 @@ class DownloadChain(ChainBase):
                             f"{round(torrent.progress, 1)}%")
             index += 1
         self.post_message(Notification(
-            channel=channel, mtype=NotificationType.Download,
-            title=title, text="\n".join(messages), userid=userid))
+            channel=channel,
+            mtype=NotificationType.Download,
+            title=title,
+            text="\n".join(messages),
+            userid=userid,
+            link=settings.MP_DOMAIN('#/downloading')
+        ))
 
     def downloading(self) -> List[DownloadingTorrent]:
         """

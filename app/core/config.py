@@ -2,7 +2,7 @@ import secrets
 import sys
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseSettings, validator
 
@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     """
     # 项目名称
     PROJECT_NAME = "MoviePilot"
+    # 域名 格式；https://movie-pilot.org
+    APP_DOMAIN: str = ""
     # API路径
     API_V1_STR: str = "/api/v1"
     # 前端资源路径
@@ -93,8 +95,8 @@ class Settings(BaseSettings):
     AUTH_SITE: str = ""
     # 交互搜索自动下载用户ID，使用,分割
     AUTO_DOWNLOAD_USER: Optional[str] = None
-    # 消息通知渠道 telegram/wechat/slack/synologychat/vocechat，多个通知渠道用,分隔
-    MESSAGER: str = "telegram"
+    # 消息通知渠道 telegram/wechat/slack/synologychat/vocechat/webpush，多个通知渠道用,分隔
+    MESSAGER: str = "webpush"
     # WeChat企业ID
     WECHAT_CORPID: Optional[str] = None
     # WeChat应用Secret
@@ -197,6 +199,8 @@ class Settings(BaseSettings):
     COOKIECLOUD_PASSWORD: Optional[str] = None
     # CookieCloud同步间隔（分钟）
     COOKIECLOUD_INTERVAL: Optional[int] = 60 * 24
+    # CookieCloud同步黑名单，多个域名,分割
+    COOKIECLOUD_BLACKLIST: Optional[str] = None
     # OCR服务器地址
     OCR_HOST: str = "https://movie-pilot.org"
     # CookieCloud对应的浏览器UA
@@ -236,29 +240,6 @@ class Settings(BaseSettings):
     PLUGIN_STATISTIC_SHARE: bool = True
     # 服务器地址，对应 https://github.com/jxxghp/MoviePilot-Server 项目
     MP_SERVER_HOST: str = "https://movie-pilot.org"
-
-    # 【已弃用】刮削入库的媒体文件
-    SCRAP_METADATA: bool = True
-    # 【已弃用】下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_PATH: Optional[str] = None
-    # 【已弃用】电影下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_MOVIE_PATH: Optional[str] = None
-    # 【已弃用】电视剧下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_TV_PATH: Optional[str] = None
-    # 【已弃用】动漫下载保存目录，容器内映射路径需要一致
-    DOWNLOAD_ANIME_PATH: Optional[str] = None
-    # 【已弃用】下载目录二级分类
-    DOWNLOAD_CATEGORY: bool = False
-    # 【已弃用】媒体库目录，多个目录使用,分隔
-    LIBRARY_PATH: Optional[str] = None
-    # 【已弃用】电影媒体库目录名
-    LIBRARY_MOVIE_NAME: str = "电影"
-    # 【已弃用】电视剧媒体库目录名
-    LIBRARY_TV_NAME: str = "电视剧"
-    # 【已弃用】动漫媒体库目录名，不设置时使用电视剧目录
-    LIBRARY_ANIME_NAME: Optional[str] = None
-    # 【已弃用】二级分类
-    LIBRARY_CATEGORY: bool = True
 
     @validator("SUBSCRIBE_RSS_INTERVAL",
                "COOKIECLOUD_INTERVAL",
@@ -302,7 +283,7 @@ class Settings(BaseSettings):
     @property
     def LOG_PATH(self):
         return self.CONFIG_PATH / "logs"
-    
+
     @property
     def COOKIE_PATH(self):
         return self.CONFIG_PATH / "cookies"
@@ -372,6 +353,24 @@ class Settings(BaseSettings):
             return []
         return [d for d in settings.DOWNLOADER.split(",") if d]
 
+    @property
+    def VAPID(self):
+        return {
+            "subject": f"mailto:{self.SUPERUSER}@movie-pilot.org",
+            "publicKey": "BH3w49sZA6jXUnE-yt4jO6VKh73lsdsvwoJ6Hx7fmPIDKoqGiUl2GEoZzy-iJfn4SfQQcx7yQdHf9RknwrL_lSM",
+            "privateKey": "JTixnYY0vEw97t9uukfO3UWKfHKJdT5kCQDiv3gu894"
+        }
+
+    def MP_DOMAIN(self, url: str = None):
+        if not self.APP_DOMAIN:
+            return None
+        domain = self.APP_DOMAIN.rstrip("/")
+        if not domain.startswith("http"):
+            domain = "http://" + domain
+        if not url:
+            return domain
+        return domain + "/" + url.lstrip("/")
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         with self.CONFIG_PATH as p:
@@ -400,6 +399,8 @@ class GlobalVar(object):
     """
     # 系统停止事件
     STOP_EVENT: threading.Event = threading.Event()
+    # webpush订阅
+    SUBSCRIPTIONS: List[dict] = []
 
     def stop_system(self):
         """
@@ -412,6 +413,18 @@ class GlobalVar(object):
         是否停止
         """
         return self.STOP_EVENT.is_set()
+
+    def get_subscriptions(self):
+        """
+        获取webpush订阅
+        """
+        return self.SUBSCRIPTIONS
+
+    def push_subscription(self, subscription: dict):
+        """
+        添加webpush订阅
+        """
+        self.SUBSCRIPTIONS.append(subscription)
 
 
 # 实例化配置

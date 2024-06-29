@@ -10,6 +10,7 @@ from typing import List, Union, Tuple
 
 import docker
 import psutil
+
 from app import schemas
 
 
@@ -118,12 +119,13 @@ class SystemUtils:
         硬链接
         """
         try:
-            # link到当前目录并改名
-            tmp_path = src.parent / (dest.name + ".mp")
+            # 准备目标路径，增加后缀 .mp
+            tmp_path = dest.with_suffix(dest.suffix + ".mp")
+            # 检查目标路径是否已存在，如果存在则先unlink
             if tmp_path.exists():
                 tmp_path.unlink()
             tmp_path.hardlink_to(src)
-            # 移动到目标目录
+            # 硬链接完成，移除 .mp 后缀
             shutil.move(tmp_path, dest)
             return 0, ""
         except Exception as err:
@@ -290,6 +292,25 @@ class SystemUtils:
                 dirs.append(path)
 
         return dirs
+
+    @staticmethod
+    def list_sub_all(directory: Path) -> List[Path]:
+        """
+        列出当前目录下的所有子目录和文件（不递归）
+        """
+        if not directory.exists():
+            return []
+
+        if directory.is_file():
+            return []
+
+        items = []
+
+        # 遍历目录
+        for path in directory.iterdir():
+            items.append(path)
+
+        return items
 
     @staticmethod
     def get_directory_size(path: Path) -> float:
@@ -465,6 +486,32 @@ class SystemUtils:
         except Exception as err:
             print(str(err))
             return False, f"重启时发生错误：{str(err)}"
+
+    @staticmethod
+    def is_hardlink(src: Path, dest: Path) -> bool:
+        """
+        判断是否为硬链接（可能无法支持宿主机挂载smb盘符映射docker的场景）
+        """
+        try:
+            if not src.exists() or not dest.exists():
+                return False
+            if src.is_file():
+                # 如果是文件，直接比较文件
+                return src.samefile(dest)
+            else:
+                for src_file in src.glob("**/*"):
+                    if src_file.is_dir():
+                        continue
+                    # 计算目标文件路径
+                    relative_path = src_file.relative_to(src)
+                    target_file = dest.joinpath(relative_path)
+                    # 检查是否是硬链接
+                    if not target_file.exists() or not src_file.samefile(target_file):
+                        return False
+                return True
+        except Exception as e:
+            print(f"Error occurred: {e}")
+            return False
 
     @staticmethod
     def is_same_disk(src: Path, dest: Path) -> bool:

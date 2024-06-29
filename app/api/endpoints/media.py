@@ -8,7 +8,7 @@ from app.chain.media import MediaChain
 from app.core.config import settings
 from app.core.context import Context
 from app.core.metainfo import MetaInfo, MetaInfoPath
-from app.core.security import verify_token, verify_uri_token
+from app.core.security import verify_token, verify_apitoken
 from app.schemas import MediaType
 
 router = APIRouter()
@@ -32,7 +32,7 @@ def recognize(title: str,
 @router.get("/recognize2", summary="识别种子媒体信息（API_TOKEN）", response_model=schemas.Context)
 def recognize2(title: str,
                subtitle: str = None,
-               _: str = Depends(verify_uri_token)) -> Any:
+               _: str = Depends(verify_apitoken)) -> Any:
     """
     根据标题、副标题识别媒体信息 API_TOKEN认证（?token=xxx）
     """
@@ -55,7 +55,7 @@ def recognize_file(path: str,
 
 @router.get("/recognize_file2", summary="识别文件媒体信息（API_TOKEN）", response_model=schemas.Context)
 def recognize_file2(path: str,
-                    _: str = Depends(verify_uri_token)) -> Any:
+                    _: str = Depends(verify_apitoken)) -> Any:
     """
     根据文件路径识别媒体信息 API_TOKEN认证（?token=xxx）
     """
@@ -97,26 +97,31 @@ def search(title: str,
     return result[(page - 1) * count:page * count]
 
 
-@router.get("/scrape", summary="刮削媒体信息", response_model=schemas.Response)
-def scrape(path: str,
+@router.post("/scrape/{storage}", summary="刮削媒体信息", response_model=schemas.Response)
+def scrape(fileitem: schemas.FileItem,
+           storage: str = "local",
            _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     刮削媒体信息
     """
-    if not path:
+    if not fileitem or not fileitem.path:
         return schemas.Response(success=False, message="刮削路径无效")
-    scrape_path = Path(path)
-    if not scrape_path.exists():
-        return schemas.Response(success=False, message="刮削路径不存在")
-    # 识别
     chain = MediaChain()
+    # 识别媒体信息
+    scrape_path = Path(fileitem.path)
     meta = MetaInfoPath(scrape_path)
-    mediainfo = chain.recognize_media(meta)
+    mediainfo = chain.recognize_by_meta(meta)
     if not media_info:
         return schemas.Response(success=False, message="刮削失败，无法识别媒体信息")
-    # 刮削
-    chain.scrape_metadata(path=scrape_path, mediainfo=mediainfo, transfer_type=settings.TRANSFER_TYPE)
-    return schemas.Response(success=True, message="刮削完成")
+    if storage == "local":
+        if not scrape_path.exists():
+            return schemas.Response(success=False, message="刮削路径不存在")
+    else:
+        if not fileitem.fileid:
+            return schemas.Response(success=False, message="刮削文件ID无效")
+    # 手动刮削
+    chain.manual_scrape(storage=storage, fileitem=fileitem, meta=meta, mediainfo=mediainfo)
+    return schemas.Response(success=True, message=f"{fileitem.path} 刮削完成")
 
 
 @router.get("/category", summary="查询自动分类配置", response_model=dict)
